@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dzotepe Confidence - CV</title>
+    <style>
+      /* Base Reset & Typography */
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        color: #111111;
+        background-color: #ffffff;
+        font-size: 11pt;
+        line-height: 1.45; /* Balanced line height */
+      }
+
+      /* Page Layout constraints for standard viewing */
+      .cv-container {
+        max-width: 800px;
+        margin: 30px auto;
+        padding: 40px;
+        background: #fff;
+        border: 1px solid #e0e0e0;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+      }
+
+      /* Print Specifics - Fine-tuned to prevent 2nd page spill */
+      @media print {
+        @page {
+          size: A4 portrait;
+          margin: 0.6in 0.6in; /* Slightly reduced top/bottom margin */
+        }
+        body {
+          font-size: 11pt;
+          color: #000 !important;
+        }
+        .cv-container {
+          margin: 0;
+          padding: 0;
+          border: none;
+          box-shadow: none;
+          width: 100%;
+          max-width: 100%;
+        }
+        section {
+          margin-bottom: 16px !important;
+        } /* Tighter section spacing for print */
+      }
+
+      /* Header & Contact Info */
+      header {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+      h1 {
+        font-size: 24pt;
+        font-weight: 700;
+        letter-spacing: 1px;
+        margin-bottom: 4px;
+        text-transform: uppercase;
+        color: #000;
+      }
+      .contact-info {
+        font-size: 10.5pt;
+        color: #333;
+      }
+      .contact-separator {
+        margin: 0 10px;
+        color: #888;
+      }
+
+      /* Sections Formatting */
+      section {
+        margin-bottom: 18px; /* Balanced gap */
+      }
+      h2 {
+        font-size: 12pt;
+        font-weight: 700;
+        text-transform: uppercase;
+        border-bottom: 1.5px solid #000;
+        padding-bottom: 3px;
+        margin-bottom: 10px;
+        letter-spacing: 0.5px;
+        color: #000;
+      }
+
+      /* General Spacing */
+      p {
+        margin-bottom: 6px;
+        text-align: justify;
+      }
+      ul {
+        margin-left: 20px;
+        margin-bottom: 6px;
+      }
+      li {
+        margin-bottom: 4px; /* Slightly tighter list spacing */
+      }
+
+      /* Experience Items */
+      .job-header {
+        display: flex;
+        justify-content: space-between;
+        font-weight: 600;
+        color: #000;
+      }
+      .job-date {
+        font-weight: 500;
+      }
+      .job-title {
+        font-style: italic;
+        margin-bottom: 6px;
+        color: #222;
+      }
+
+      /* Education Items */
+      .edu-item {
+        margin-bottom: 10px;
+      }
+      .edu-header {
+        display: flex;
+        justify-content: space-between;
+        font-weight: 600;
+        color: #000;
+      }
+
+      /* Skills - Strict 2 Column Grid */
+      .skills-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        column-gap: 20px;
+        row-gap: 4px;
+        margin-left: 20px;
+      }
+
+      /* References Formatting */
+      .reference-block {
+        margin-top: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="cv-container">
+      <header>
+        <h1>Dzotepe Confidence</h1>
+        <div class="contact-info">
+          <span>0559209850</span><span class="contact-separator">|</span>
+          <span>dzotepeconfidence8@gmail.com</span
+          ><span class="contact-separator">|</span>
+          <span>Ho, Volta Region, Ghana</span>
+        </div>
+      </header>
+
+      <section>
+        <h2>Career Objective</h2>
+        <p>
+          Dedicated and motivated educator with a strong passion for teaching
+          and community development. Seeking to contribute to the Ghana
+          Education Service by fostering academic excellence, instilling
+          discipline, and supporting holistic student growth through innovative
+          teaching methods and effective classroom management.
+        </p>
+      </section>
+
+      <section>
+        <h2>Teaching Experience</h2>
+        <div class="job-header">
+          <span
+            >National Service Personnel — Agotime Agbesia D/A Basic School</span
+          >
+          <span class="job-date">March 2024 – Feb 2025</span>
+        </div>
+        <div class="job-title">Class Teacher (Basic Two)</div>
+        <ul>
+          <li>
+            Supported classroom management and student discipline to ensure a
+            productive learning environment.
+          </li>
+          <li>
+            Organized extracurricular literacy programs tailored to
+            systematically improve reading skills.
+          </li>
+          <li>
+            Conducted community-focused literacy workshops for both children and
+            adults.
+          </li>
+          <li>
+            Designed and implemented engaging teaching materials to support
+            interactive learning.
+          </li>
+          <li>
+            Mentored and prepared students thoroughly for the Basic Education
+            Certificate Examination (BECE).
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Education</h2>
+        <div class="edu-item">
+          <div class="edu-header">
+            <span>St. Francis College of Education</span>
+            <span class="job-date">2023</span>
+          </div>
+          <div>Bachelor of Education (B.Ed.) in Basic Education</div>
+        </div>
+        <div class="edu-item">
+          <div class="edu-header">
+            <span>Bueman Senior High School</span>
+          </div>
+          <div>West African Senior School Certificate Examination (WASSCE)</div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Skills</h2>
+        <ul class="skills-grid">
+          <li>Classroom management and student engagement</li>
+          <li>Curriculum development and lesson planning</li>
+          <li>Strong communication and interpersonal skills</li>
+          <li>Proficient in Microsoft Office (Word, Excel, PowerPoint)</li>
+          <li>Teamwork, collaboration, and leadership abilities</li>
+          <li>Student assessment and performance tracking</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Certifications</h2>
+        <ul>
+          <li>Ghana Teacher Licensure Examination — Passed (2024)</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Achievements</h2>
+        <ul>
+          <li>
+            Successfully improved literacy levels of over 50 students during
+            targeted volunteer teaching initiatives.
+          </li>
+          <li>
+            Recognized for outstanding commitment to student mentorship at
+            Agotime Agbesia D/A Basic School.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>References</h2>
+        <div class="reference-block">
+          <strong>Madam Yorgbe Catherine</strong><br />
+          Headmistress, Agbesia D/A Basic School
+        </div>
+      </section>
+    </div>
+  </body>
+</html>

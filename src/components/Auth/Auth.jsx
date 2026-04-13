@@ -12,8 +12,11 @@ export default function Auth() {
   const [loading, setLoading] = useState(false);
 
   const handleAuth = async () => {
-    if (!email.trim() || !password.trim()) {
-      alert("Email and password are required");
+    if (
+      !email.trim().endsWith("@stu.ucc.edu.gh") &&
+      !email.trim().endsWith("@ucc.edu.gh")
+    ) {
+      alert("Only UCC institutional emails are allowed.");
       return;
     }
 

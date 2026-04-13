@@ -7,40 +7,38 @@ export function useDiscoveryFeed() {
   const [filter, setFilter] = useState("all");
   const [categoryId, setCategoryId] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
-
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [categories, setCategories] = useState([]);
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [error, setError] = useState(null);
-
   const [hasMore, setHasMore] = useState(true);
-
   const [cursor, setCursor] = useState(null);
+  const [resetKey, setResetKey] = useState(0); // ✅ FIX: reset trigger
 
   const requestIdRef = useRef(0);
 
-  // --- FETCH CATEGORIES ---
+  // --- CATEGORIES ---
   useEffect(() => {
-    async function loadCategories() {
-      const { data, error } = await supabase.from("categories").select("*");
-      if (!error && data) setCategories(data);
-    }
-    loadCategories();
+    supabase
+      .from("categories")
+      .select("*")
+      .then(({ data }) => {
+        if (data) setCategories(data);
+      });
   }, []);
 
   // --- DEBOUNCE SEARCH ---
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), 500);
-    return () => clearTimeout(timer);
+    const t = setTimeout(() => setDebouncedSearch(searchTerm), 500);
+    return () => clearTimeout(t);
   }, [searchTerm]);
 
-  // --- CORE FETCH FUNCTION ---
+  // --- CORE FETCH ---
   const fetchListings = useCallback(
-    async (reset = false) => {
+    async (reset = false, cursorOverride = cursor) => {
       const requestId = ++requestIdRef.current;
-
       setLoading(true);
       setError(null);
 
@@ -53,29 +51,23 @@ export function useDiscoveryFeed() {
           .order("id", { ascending: false })
           .limit(ITEMS_PER_PAGE);
 
-        if (filter !== "all") {
-          query = query.eq("listing_type", filter);
-        }
+        if (filter !== "all") query = query.eq("listing_type", filter);
+        if (categoryId) query = query.eq("category_id", categoryId);
 
-        if (categoryId) {
-          query = query.eq("category_id", categoryId);
-        }
-
-        const cleanSearch = debouncedSearchTerm?.trim();
-        if (cleanSearch) {
+        const clean = debouncedSearch?.trim();
+        if (clean) {
           query = query.or(
-            `title.ilike.%${cleanSearch}%,description.ilike.%${cleanSearch}%`,
+            `title.ilike.%${clean}%,description.ilike.%${clean}%`,
           );
         }
 
-        if (!reset && cursor) {
+        if (!reset && cursorOverride) {
           query = query.or(
-            `visibility_score.lt.${cursor.score},and(visibility_score.eq.${cursor.score},created_at.lt.${cursor.created_at}),and(visibility_score.eq.${cursor.score},created_at.eq.${cursor.created_at},id.lt.${cursor.id})`,
+            `visibility_score.lt.${cursorOverride.score},and(visibility_score.eq.${cursorOverride.score},created_at.lt.${cursorOverride.created_at}),and(visibility_score.eq.${cursorOverride.score},created_at.eq.${cursorOverride.created_at},id.lt.${cursorOverride.id})`,
           );
         }
 
         const { data, error } = await query;
-
         if (error) throw error;
         if (requestId !== requestIdRef.current) return;
 
@@ -98,10 +90,7 @@ export function useDiscoveryFeed() {
           created_at: last.created_at,
           id: last.id,
         });
-
-        if (data.length < ITEMS_PER_PAGE) {
-          setHasMore(false);
-        }
+        if (data.length < ITEMS_PER_PAGE) setHasMore(false);
       } catch (err) {
         console.error("Feed Error:", err.message);
         setError(err.message);
@@ -112,30 +101,27 @@ export function useDiscoveryFeed() {
         }
       }
     },
-    [filter, categoryId, debouncedSearchTerm, cursor],
-  );
+    [filter, categoryId, debouncedSearch],
+  ); // ✅ cursor removed from deps
 
-  // --- 🔥 THIS IS THE FIX (REFETCH) ---
-  const refetch = useCallback(() => {
-    requestIdRef.current++;
-    setCursor(null);
-    setHasMore(true);
-    setIsInitialLoading(true);
-    fetchListings(true);
-  }, [fetchListings]);
-
-  // --- RESET ON FILTER CHANGE ---
+  // --- RESET ON FILTER / SEARCH / resetKey CHANGE ---
   useEffect(() => {
     requestIdRef.current++;
     setCursor(null);
     setHasMore(true);
     setIsInitialLoading(true);
-    fetchListings(true);
-  }, [filter, categoryId, debouncedSearchTerm]);
+    fetchListings(true, null); // pass null so cursor override is clean
+  }, [filter, categoryId, debouncedSearch, resetKey]); // ✅ resetKey added
 
+  // --- LOAD MORE ---
   const loadMore = () => {
-    if (!loading && hasMore) fetchListings(false);
+    if (!loading && hasMore) fetchListings(false, cursor);
   };
+
+  // --- REFETCH --- ✅ just bumps resetKey, no stale closure possible
+  const refetch = useCallback(() => {
+    setResetKey((k) => k + 1);
+  }, []);
 
   return {
     listings,
@@ -145,7 +131,7 @@ export function useDiscoveryFeed() {
     error,
     hasMore,
     loadMore,
-    refetch, // 🔥 EXPOSED HERE
+    refetch,
     filter,
     setFilter,
     categoryId,

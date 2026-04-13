@@ -1,20 +1,28 @@
 import { FeedCard } from "./FeedCard";
 
-export function FeedList({ listings }) {
-  if (listings.length === 0) {
+export function FeedList({ listings, onListingClick }) {
+  if (!listings.length) {
     return (
-      <div className="text-center py-20 border border-dashed border-slate-800 rounded-3xl">
-        <p className="text-slate-600 text-[10px] font-black uppercase tracking-widest">
-          No listings found
+      <div className="flex flex-col items-center justify-center py-32 text-center">
+        <div className="w-20 h-20 rounded-full bg-slate-800 flex items-center justify-center text-4xl mb-5">
+          🏪
+        </div>
+        <p className="text-white font-bold text-lg">No listings found</p>
+        <p className="text-slate-500 text-sm mt-2">
+          Try a different search term or filter
         </p>
       </div>
     );
   }
 
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-5 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
       {listings.map((item) => (
-        <FeedCard key={item.id} item={item} />
+        <FeedCard
+          key={item.id}
+          item={item}
+          onClick={() => onListingClick(item)}
+        />
       ))}
     </div>
   );

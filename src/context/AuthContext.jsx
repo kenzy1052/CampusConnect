@@ -8,55 +8,26 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // 🔥 HARD RESET (used when session is invalid)
-  const forceLogout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setProfile(null);
-  };
-
   const fetchProfile = async (userId) => {
     try {
       const { data, error } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", userId)
-        .maybeSingle(); // 🔥 CRITICAL FIX
+        .maybeSingle();
 
       if (error) {
         console.error("Profile fetch error:", error.message);
-        await forceLogout(); // 🔥 kill invalid session
+        setProfile(null);
         return;
       }
 
-      // 🔥 PROFILE DOES NOT EXIST → INVALID USER STATE
-      if (!data) {
-        console.warn("Profile missing → forcing logout");
-        await forceLogout();
-        return;
-      }
-
-      setProfile(data);
+      // 🔥 DO NOT LOG OUT — just set null
+      setProfile(data || null);
     } catch (err) {
       console.error("Unexpected profile error:", err);
-      await forceLogout();
+      setProfile(null);
     }
-  };
-
-  const updateProfile = async (updates) => {
-    if (!user) throw new Error("No authenticated user");
-
-    const { error } = await supabase
-      .from("profiles")
-      .update(updates)
-      .eq("id", user.id);
-
-    if (error) {
-      console.error("Profile update error:", error.message);
-      throw error;
-    }
-
-    await fetchProfile(user.id);
   };
 
   useEffect(() => {
@@ -64,40 +35,37 @@ export function AuthProvider({ children }) {
 
     const init = async () => {
       try {
-        const { data, error } = await supabase.auth.getSession();
-
-        if (error) {
-          console.error("Session error:", error.message);
-          if (mounted) setLoading(false);
-          return;
-        }
-
-        const currentUser = data?.session?.user ?? null;
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
         if (!mounted) return;
 
+        const currentUser = session?.user ?? null;
+
         setUser(currentUser);
 
+        // 🔥 DO NOT AWAIT THIS
         if (currentUser) {
-          await fetchProfile(currentUser.id);
+          fetchProfile(currentUser.id); // fire and forget
         }
       } catch (err) {
         console.error("Init error:", err);
       } finally {
-        if (mounted) setLoading(false);
+        if (mounted) setLoading(false); // 🔥 ALWAYS RELEASE UI
       }
     };
 
     init();
 
     const { data: listener } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      (_event, session) => {
         const currentUser = session?.user ?? null;
 
         setUser(currentUser);
 
         if (currentUser) {
-          await fetchProfile(currentUser.id);
+          fetchProfile(currentUser.id); // also not awaited
         } else {
           setProfile(null);
         }
@@ -111,13 +79,13 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = async () => {
-    await forceLogout();
+    await supabase.auth.signOut();
+    setUser(null);
+    setProfile(null);
   };
 
   return (
-    <AuthContext.Provider
-      value={{ user, profile, loading, logout, updateProfile }}
-    >
+    <AuthContext.Provider value={{ user, profile, loading, logout }}>
       {children}
     </AuthContext.Provider>
   );
