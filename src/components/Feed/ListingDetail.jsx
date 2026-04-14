@@ -12,6 +12,9 @@ export default function ListingDetail({ listing, onBack }) {
   const [phones, setPhones] = useState([]);
   const [whatsapp, setWhatsapp] = useState(null);
 
+  // 🔥 NEW STATES FOR REPORTING
+  const [reportStatus, setReportStatus] = useState(null);
+
   const isOwnListing = user?.id === listing.seller_id;
 
   useEffect(() => {
@@ -19,6 +22,24 @@ export default function ListingDetail({ listing, onBack }) {
     fetchContacts();
     recordView(); // 🔥 Tracks the view when component mounts
   }, [listing.id]);
+
+  // 🔥 CHECK IF USER ALREADY REPORTED THIS LISTING
+  useEffect(() => {
+    const checkReportStatus = async () => {
+      const { data } = await supabase
+        .from("reports")
+        .select("id, is_resolved")
+        .eq("listing_id", listing.id)
+        .eq("reporter_id", user.id) // Used reporter_id based on your DB insert logic
+        .maybeSingle();
+
+      if (data) {
+        setReportStatus(data.is_resolved ? "resolved" : "submitted");
+      }
+    };
+
+    if (user) checkReportStatus();
+  }, [listing.id, user]);
 
   // --- RECORDING LOGIC ---
   const recordView = async () => {
@@ -128,7 +149,7 @@ export default function ListingDetail({ listing, onBack }) {
                           key={i}
                           onClick={() => setCurrent(i)}
                           className={
-                            "w-2h-2 rounded-full transition-all " +
+                            "w-2 h-2 rounded-full transition-all " +
                             (i === current
                               ? "bg-white scale-110"
                               : "bg-white/40")
@@ -276,19 +297,45 @@ export default function ListingDetail({ listing, onBack }) {
             )}
           </div>
 
+          {/* 🔥 REPORT BUTTON & STATUS UI */}
           {user && !isOwnListing && (
-            <button
-              onClick={() => setShowReport(true)}
-              className="w-full text-slate-600 hover:text-red-400 text-[11px] font-bold uppercase tracking-widest transition-colors border border-slate-800/50 hover:border-red-500/20 py-2.5 rounded-xl"
-            >
-              🚩 Report this listing
-            </button>
+            <div className="flex flex-col items-center">
+              <button
+                onClick={() => setShowReport(true)}
+                disabled={
+                  reportStatus === "submitted" || reportStatus === "resolved"
+                }
+                className="w-full text-slate-600 hover:text-red-400 text-[11px] font-bold uppercase tracking-widest transition-colors border border-slate-800/50 hover:border-red-500/20 py-2.5 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {reportStatus === "submitted"
+                  ? "🚩 Reported"
+                  : reportStatus === "resolved"
+                    ? "🚩 Report Reviewed"
+                    : "🚩 Report this listing"}
+              </button>
+
+              {reportStatus === "submitted" && (
+                <p className="text-xs text-amber-400 mt-2 text-center w-full">
+                  Report submitted · Under review
+                </p>
+              )}
+
+              {reportStatus === "resolved" && (
+                <p className="text-xs text-emerald-400 mt-2 text-center w-full">
+                  Report reviewed
+                </p>
+              )}
+            </div>
           )}
         </div>
       </div>
 
       {showReport && (
-        <ReportModal listing={listing} onClose={() => setShowReport(false)} />
+        <ReportModal
+          listing={listing}
+          onClose={() => setShowReport(false)}
+          onSuccess={() => setReportStatus("submitted")} // Update UI instantly without refresh
+        />
       )}
     </div>
   );

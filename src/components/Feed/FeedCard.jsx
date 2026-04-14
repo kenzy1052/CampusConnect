@@ -1,3 +1,5 @@
+import { getTrustTier } from "../../utils/trustTier";
+
 export function FeedCard({ item, onClick }) {
   const getPriceDisplay = () => {
     if (item.price !== null) return `GH₵ ${item.price}`;
@@ -10,6 +12,8 @@ export function FeedCard({ item, onClick }) {
 
   const isService = item.listing_type === "service";
   const initial = (item.seller_name || "U")[0].toUpperCase();
+
+  const tier = getTrustTier(item.seller_trust ?? 50);
 
   return (
     <div
@@ -76,8 +80,8 @@ export function FeedCard({ item, onClick }) {
           </div>
           <div className="flex items-center gap-1 shrink-0 bg-slate-800 px-2 py-0.5 rounded-full">
             <span className="text-yellow-400 text-[10px]">★</span>
-            <span className="text-[10px] font-bold text-slate-200">
-              {item.seller_trust}
+            <span className={`text-[10px] font-bold ${tier.color}`}>
+              {tier.label}
             </span>
           </div>
         </div>

@@ -22,7 +22,17 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      // 🔥 DO NOT LOG OUT — just set null
+      // 🔥 SUSPENSION CHECK
+      if (data?.is_suspended) {
+        await supabase.auth.signOut();
+        setUser(null);
+        setProfile(null);
+        alert(
+          "Your account has been suspended. Contact the admin if you believe this is a mistake.",
+        );
+        return;
+      }
+
       setProfile(data || null);
     } catch (err) {
       console.error("Unexpected profile error:", err);
@@ -42,17 +52,15 @@ export function AuthProvider({ children }) {
         if (!mounted) return;
 
         const currentUser = session?.user ?? null;
-
         setUser(currentUser);
 
-        // 🔥 DO NOT AWAIT THIS
         if (currentUser) {
-          fetchProfile(currentUser.id); // fire and forget
+          fetchProfile(currentUser.id);
         }
       } catch (err) {
         console.error("Init error:", err);
       } finally {
-        if (mounted) setLoading(false); // 🔥 ALWAYS RELEASE UI
+        if (mounted) setLoading(false);
       }
     };
 
@@ -61,11 +69,10 @@ export function AuthProvider({ children }) {
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         const currentUser = session?.user ?? null;
-
         setUser(currentUser);
 
         if (currentUser) {
-          fetchProfile(currentUser.id); // also not awaited
+          fetchProfile(currentUser.id);
         } else {
           setProfile(null);
         }
