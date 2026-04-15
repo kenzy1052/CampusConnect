@@ -16,12 +16,12 @@ export default function MyListings({ onCreateListing }) {
 
   const fetchMyListings = async () => {
     setLoading(true);
+    // Updated to use discovery_feed for pre-computed metrics
     const { data, error } = await supabase
-      .from("listings")
+      .from("discovery_feed")
       .select(
         `
         *,
-        categories(name),
         listing_images(image_url, position)
       `,
       )
@@ -36,7 +36,7 @@ export default function MyListings({ onCreateListing }) {
   const getStatus = (listing) => {
     if (listing.is_hidden) return "Hidden";
     if (!listing.is_active && listing.sold_at) return "Sold";
-    if (!listing.is_active) return "Removed"; // Violation or Manual Archive
+    if (!listing.is_active) return "Removed";
     return "Active";
   };
 
@@ -57,6 +57,7 @@ export default function MyListings({ onCreateListing }) {
       .delete()
       .eq("id", listing.id)
       .eq("seller_id", user.id);
+
     if (error) alert("Failed: " + error.message);
     else setListings((prev) => prev.filter((l) => l.id !== listing.id));
     setActionId(null);
@@ -70,12 +71,13 @@ export default function MyListings({ onCreateListing }) {
       .update({ is_active: false, sold_at: new Date().toISOString() })
       .eq("id", listing.id);
 
-    if (error) alert("Failed: " + error.message);
-    else {
+    if (error) {
+      alert("Failed: " + error.message);
+    } else {
       await supabase.rpc("increment_trust_on_sale", {
         p_listing_id: listing.id,
       });
-      fetchAll(); // Refresh to get correct status/sold_at
+      fetchMyListings(); // Corrected from fetchAll()
     }
     setActionId(null);
   };
@@ -201,7 +203,7 @@ export default function MyListings({ onCreateListing }) {
                         </span>
                       </div>
                       <p className="text-slate-500 text-xs mt-1">
-                        {listing.categories?.name} · {getPrice(listing)}
+                        {listing.category_name} · {getPrice(listing)}
                       </p>
 
                       <div className="mt-2 flex items-center gap-4 text-xs text-slate-500">

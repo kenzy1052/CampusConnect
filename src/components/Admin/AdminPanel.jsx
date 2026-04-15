@@ -16,20 +16,22 @@ export default function AdminPanel() {
   useEffect(() => {
     fetchAll();
   }, []);
+
   useEffect(() => {
     if (tab === "audit") fetchLogs();
   }, [tab]);
 
+  // 🔴 STEP 3 — FIXED: STRICT ERROR CHECKING IN FETCHALL
   const fetchAll = async () => {
     setLoading(true);
 
     const [
-      { data: repsRaw },
-      { data: resolvedReps },
-      { data: usrs },
-      { count: totalListings },
-      { count: totalUsers },
-      { count: pendingCount },
+      pendingRes,
+      resolvedRes,
+      usersRes,
+      listingsCountRes,
+      usersCountRes,
+      pendingCountRes,
     ] = await Promise.all([
       supabase
         .from("reports")
@@ -54,6 +56,21 @@ export default function AdminPanel() {
         .eq("is_resolved", false),
     ]);
 
+    if (pendingRes.error || resolvedRes.error || usersRes.error) {
+      console.error(
+        "FetchAll Errors:",
+        pendingRes.error,
+        resolvedRes.error,
+        usersRes.error,
+      );
+      setLoading(false);
+      return;
+    }
+
+    const repsRaw = pendingRes.data;
+    const resolvedReps = resolvedRes.data;
+    const usrs = usersRes.data;
+
     // Group pending reports by listing
     const grouped = Object.values(
       repsRaw?.reduce((acc, r) => {
@@ -68,9 +85,9 @@ export default function AdminPanel() {
     setResolvedReports(resolvedReps || []);
     if (usrs) setUsers(usrs);
     setStats({
-      listings: totalListings ?? 0,
-      users: totalUsers ?? 0,
-      pending: pendingCount ?? 0,
+      listings: listingsCountRes.count ?? 0,
+      users: usersCountRes.count ?? 0,
+      pending: pendingCountRes.count ?? 0,
     });
     setLoading(false);
   };
@@ -88,6 +105,47 @@ export default function AdminPanel() {
     await supabase
       .from("admin_audit_logs")
       .insert({ action, target_type: targetType, target_id: targetId });
+  };
+
+  // ✅ STEP 2 & 5 — REPLACED DISMISS LOGIC + VERIFICATION LOGS
+  const dismissReport = async (report) => {
+    setActionId(report.id);
+    console.log("Before dismiss:", report);
+
+    const { error } = await supabase.rpc("admin_dismiss_report", {
+      p_report_id: report.id,
+    });
+
+    if (error) {
+      alert(error.message);
+      setActionId(null);
+      return;
+    }
+
+    const { data } = await supabase
+      .from("reports")
+      .select("*")
+      .eq("id", report.id)
+      .single();
+
+    console.log("After dismiss:", data);
+
+    await fetchAll(); // 🔴 MUST BE AWAITED
+
+    setActionId(null);
+  };
+
+  // Kept for the "Dismiss All on Listing" top-level button, but strictly awaited
+  const dismissAllReports = async (listingId) => {
+    if (!window.confirm("Dismiss all reports for this listing?")) return;
+    setActionId(listingId);
+    await supabase
+      .from("reports")
+      .update({ is_resolved: true, resolution_action: "dismissed" })
+      .eq("listing_id", listingId);
+    await logAdminAction("DISMISS_REPORTS", "listing", listingId);
+    await fetchAll();
+    setActionId(null);
   };
 
   const handleViewListing = async (listingId) => {
@@ -133,19 +191,27 @@ export default function AdminPanel() {
     });
     if (error) alert(error.message);
     else await logAdminAction("DELETE_LISTING", "listing", listingId);
-    fetchAll();
+    await fetchAll();
     setActionId(null);
   };
 
-  const dismissAllReports = async (listingId) => {
-    if (!window.confirm("Dismiss all reports for this listing?")) return;
+  // --- NEW: TOGGLE HIDE LOGIC ---
+  const toggleHide = async (listingId, hidden) => {
     setActionId(listingId);
-    await supabase
-      .from("reports")
-      .update({ is_resolved: true, resolution_action: "dismissed" })
-      .eq("listing_id", listingId);
-    await logAdminAction("DISMISS_REPORTS", "listing", listingId);
-    fetchAll();
+    const { error } = await supabase.rpc("admin_set_listing_visibility", {
+      p_listing_id: listingId,
+      p_hidden: hidden,
+    });
+
+    if (error) alert(error.message);
+    else
+      await logAdminAction(
+        hidden ? "HIDE_LISTING" : "UNHIDE_LISTING",
+        "listing",
+        listingId,
+      );
+
+    await fetchAll();
     setActionId(null);
   };
 
@@ -162,7 +228,7 @@ export default function AdminPanel() {
     });
     if (error) alert(error.message);
     else await logAdminAction("APPLY_PENALTY", "listing", listingId);
-    fetchAll();
+    await fetchAll();
     setActionId(null);
   };
 
@@ -173,7 +239,7 @@ export default function AdminPanel() {
       .update({ trust_score: 25 })
       .eq("id", userId);
     await logAdminAction("RESET_USER_TRUST", "profile", userId);
-    fetchAll();
+    await fetchAll();
   };
 
   const toggleSuspension = async (u) => {
@@ -187,7 +253,7 @@ export default function AdminPanel() {
       "profile",
       u.id,
     );
-    fetchAll();
+    await fetchAll();
   };
 
   // ── LISTING INSPECTOR VIEW ──
@@ -306,7 +372,14 @@ export default function AdminPanel() {
           ) : (
             reports.map((group) => {
               const listing = group.listing;
-              const reportList = group.reports;
+
+              // ✅ STEP 4 — ADD UI DEFENSIVE FILTER (NON-NEGOTIABLE)
+              // Filters the reports inside the group map to prevent ghost entries
+              const reportList = group.reports.filter((r) => !r.is_resolved);
+
+              // If all reports in this group were resolved/dismissed locally, don't render the listing box at all
+              if (reportList.length === 0) return null;
+
               const busy = actionId === listing?.id;
               return (
                 <div
@@ -342,17 +415,38 @@ export default function AdminPanel() {
                           👁 View
                         </button>
                       )}
+
+                      {/* NEW: Hide/Unhide Buttons */}
+                      {listing?.id &&
+                        (listing.is_hidden ? (
+                          <button
+                            onClick={() => toggleHide(listing.id, false)}
+                            disabled={busy}
+                            className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-500/30 text-[10px] font-black uppercase rounded-lg transition-all disabled:opacity-40"
+                          >
+                            {busy ? "..." : "👁 Unhide"}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => toggleHide(listing.id, true)}
+                            disabled={busy}
+                            className="px-3 py-2 bg-amber-600/20 hover:bg-amber-600/40 text-amber-400 border border-amber-500/30 text-[10px] font-black uppercase rounded-lg transition-all disabled:opacity-40"
+                          >
+                            {busy ? "..." : "🙈 Hide"}
+                          </button>
+                        ))}
+
                       <button
                         onClick={() => dismissAllReports(listing.id)}
                         disabled={busy}
                         className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-black uppercase rounded-lg border border-slate-700 transition-all disabled:opacity-40"
                       >
-                        {busy ? "..." : "Dismiss"}
+                        {busy ? "..." : "Dismiss All"}
                       </button>
                       <button
                         onClick={() => confirmListingPenalty(listing.id)}
                         disabled={busy}
-                        className="px-3 py-2 bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black uppercase rounded-lg transition-all disabled:opacity-40"
+                        className="px-3 py-2 bg-orange-600 hover:bg-orange-500 text-white text-[10px] font-black uppercase rounded-lg transition-all disabled:opacity-40"
                       >
                         {busy ? "..." : "−10 Trust"}
                       </button>
@@ -368,22 +462,38 @@ export default function AdminPanel() {
 
                   {/* INDIVIDUAL REPORT REASONS */}
                   <div className="space-y-2 border-t border-slate-800/50 pt-4">
-                    {reportList.map((r) => (
-                      <div
-                        key={r.id}
-                        className="flex items-center justify-between bg-slate-950/60 border border-slate-800/50 rounded-xl px-4 py-2.5 gap-3"
-                      >
-                        <p className="text-xs text-slate-400 italic flex-1">
-                          "{r.reason}"
-                        </p>
-                        <span className="text-[9px] text-slate-600 shrink-0">
-                          {new Date(r.created_at).toLocaleDateString("en-GB", {
-                            day: "numeric",
-                            month: "short",
-                          })}
-                        </span>
-                      </div>
-                    ))}
+                    {reportList.map((r) => {
+                      const isDismissing = actionId === r.id;
+                      return (
+                        <div
+                          key={r.id}
+                          className="flex items-center justify-between bg-slate-950/60 border border-slate-800/50 rounded-xl px-4 py-2.5 gap-3"
+                        >
+                          <p className="text-xs text-slate-400 italic flex-1">
+                            "{r.reason}"
+                          </p>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className="text-[9px] text-slate-600">
+                              {new Date(r.created_at).toLocaleDateString(
+                                "en-GB",
+                                {
+                                  day: "numeric",
+                                  month: "short",
+                                },
+                              )}
+                            </span>
+                            {/* NEW: Individual dismiss button to utilize the admin_dismiss_report RPC */}
+                            <button
+                              onClick={() => dismissReport(r)}
+                              disabled={isDismissing}
+                              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[9px] font-black uppercase rounded border border-slate-700 transition-all disabled:opacity-40"
+                            >
+                              {isDismissing ? "..." : "Dismiss"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );

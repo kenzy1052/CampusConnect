@@ -12,75 +12,76 @@ export function FeedCard({ item, onClick }) {
 
   const isService = item.listing_type === "service";
   const initial = (item.seller_name || "U")[0].toUpperCase();
-
   const tier = getTrustTier(item.seller_trust ?? 50);
 
   return (
     <div
       onClick={onClick}
-      className="group bg-slate-900 rounded-2xl overflow-hidden border border-slate-800/60 hover:border-indigo-500/40 hover:shadow-2xl hover:shadow-indigo-950/50 transition-all duration-300 cursor-pointer flex flex-col"
+      className="group bg-slate-900 rounded-xl overflow-hidden border border-slate-800/60 hover:border-indigo-500/50 hover:shadow-[0_0_20px_rgba(79,70,229,0.15)] transition-all duration-300 cursor-pointer flex flex-col"
     >
-      {/* IMAGE BLOCK */}
-      <div className="relative w-full aspect-[4/3] bg-slate-800 overflow-hidden shrink-0">
+      {/* IMAGE BLOCK - Perfect 1:1 Square */}
+      <div className="relative w-full aspect-square bg-slate-950 overflow-hidden shrink-0">
         <img
           src={item.image_url || "/placeholder.png"}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+          className="w-full h-full object-cover transition-opacity duration-300"
           alt={item.title}
         />
-        {/* gradient so bottom text is legible */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
 
-        {/* type badge — top left */}
-        <span
-          className={`absolute top-3 left-3 px-2.5 py-1 rounded-full text-[8px] font-black uppercase tracking-widest backdrop-blur-md ${
-            isService
-              ? "bg-indigo-600/60 text-indigo-100 border border-indigo-400/40"
-              : "bg-emerald-600/60 text-emerald-100 border border-emerald-400/40"
-          }`}
-        >
-          {isService ? "Service" : "Product"}
-        </span>
+        {/* Subtle 2px blur overlay only if you want that "depth" feel, otherwise this layer is invisible */}
+        <div className="absolute inset-0 backdrop-blur-[2px] opacity-0 group-hover:opacity-10 transition-opacity duration-300" />
 
-        {/* category — top right */}
-        <span className="absolute top-3 right-3 px-2 py-1 rounded-full text-[8px] font-bold bg-black/50 text-slate-300 backdrop-blur-md border border-white/10 max-w-[90px] truncate">
-          {item.category_name}
-        </span>
+        {/* BOTTOM GRADIENT (For text legibility) */}
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent pointer-events-none" />
 
-        {/* price + negotiable — bottom of image */}
-        <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2">
-          <span className="text-white font-black text-[15px] drop-shadow-lg leading-none">
+        {/* BADGES */}
+        <div className="absolute top-2.5 left-2.5 right-2.5 flex justify-between items-start gap-2">
+          <span
+            className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider ${
+              isService
+                ? "bg-indigo-600 text-white"
+                : "bg-emerald-600 text-white"
+            }`}
+          >
+            {isService ? "Service" : "Product"}
+          </span>
+
+          <span className="px-2 py-0.5 rounded-md text-[8px] font-bold bg-slate-900/90 text-slate-300 border border-white/10 backdrop-blur-sm truncate max-w-[80px]">
+            {item.category_name}
+          </span>
+        </div>
+
+        {/* PRICE */}
+        <div className="absolute bottom-3 left-3 right-3">
+          <span className="text-white font-bold text-base tracking-tight drop-shadow-md">
             {getPriceDisplay()}
           </span>
-          {item.negotiable && (
-            <span className="text-[8px] font-bold bg-indigo-600/60 backdrop-blur-sm text-indigo-100 px-2 py-0.5 rounded-full border border-indigo-400/40 shrink-0">
-              Negotiable
-            </span>
-          )}
         </div>
       </div>
 
       {/* TEXT BLOCK */}
       <div className="p-4 flex flex-col flex-1">
-        <h2 className="font-bold text-[14px] text-white leading-snug line-clamp-2">
+        <h2 className="font-bold text-[14px] text-slate-100 leading-snug line-clamp-2 transition-colors duration-300 group-hover:text-indigo-400">
           {item.title}
         </h2>
+
         <p className="text-[12px] text-slate-500 mt-1.5 line-clamp-2 flex-1 leading-relaxed">
           {item.description || "No description provided."}
         </p>
 
         {/* SELLER ROW */}
-        <div className="mt-3 pt-3 border-t border-slate-800/60 flex items-center justify-between gap-2">
+        <div className="mt-3 pt-3 border-t border-slate-800/40 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-[10px] font-black text-white shrink-0">
+            <div className="w-6 h-6 rounded bg-indigo-600 flex items-center justify-center text-[10px] font-black text-white shrink-0">
               {initial}
             </div>
-            <span className="text-[11px] text-slate-400 truncate">
+            <span className="text-[11px] font-medium text-slate-400 truncate">
               {item.seller_name}
             </span>
           </div>
-          <div className="flex items-center gap-1 shrink-0 bg-slate-800 px-2 py-0.5 rounded-full">
-            <span className="text-yellow-400 text-[10px]">★</span>
-            <span className={`text-[10px] font-bold ${tier.color}`}>
+
+          <div className={`flex items-center gap-1 shrink-0 ${tier.color}`}>
+            <span className="text-[10px]">★</span>
+            <span className="text-[10px] font-bold uppercase tracking-tighter">
               {tier.label}
             </span>
           </div>
