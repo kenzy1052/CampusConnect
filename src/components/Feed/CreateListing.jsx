@@ -11,6 +11,7 @@ export function CreateListing({ user, onCancel, onSuccess }) {
     price_max: "",
     category_id: "",
     negotiable: false,
+    condition: "new",
   });
 
   const [images, setImages] = useState([]);
@@ -70,6 +71,8 @@ export function CreateListing({ user, onCancel, onSuccess }) {
             type: formData.listing_type,
             category_id: formData.category_id,
             seller_id: user.id,
+            condition:
+              formData.listing_type === "product" ? formData.condition : null,
 
             price:
               formData.listing_type === "product" && formData.price
@@ -193,6 +196,7 @@ export function CreateListing({ user, onCancel, onSuccess }) {
                   price: "",
                   price_min: "",
                   price_max: "",
+                  condition: type === "product" ? "new" : null,
                 })
               }
               className={`flex-1 py-3 rounded-lg text-[11px] font-black uppercase tracking-widest transition-all ${
@@ -239,24 +243,45 @@ export function CreateListing({ user, onCancel, onSuccess }) {
             />
           </div>
 
-          <div>
-            <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">
-              Category
-            </label>
-            <select
-              value={formData.category_id}
-              onChange={(e) =>
-                setFormData({ ...formData, category_id: e.target.value })
-              }
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white appearance-none outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
-            >
-              <option value="">Select Category</option>
-              {filteredCategories.map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name}
-                </option>
-              ))}
-            </select>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">
+                Category
+              </label>
+              <select
+                value={formData.category_id}
+                onChange={(e) =>
+                  setFormData({ ...formData, category_id: e.target.value })
+                }
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white appearance-none outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+              >
+                <option value="">Select Category</option>
+                {filteredCategories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* NEW CONDITION DROPDOWN */}
+            {formData.listing_type === "product" && (
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 block">
+                  Condition
+                </label>
+                <select
+                  value={formData.condition}
+                  onChange={(e) =>
+                    setFormData({ ...formData, condition: e.target.value })
+                  }
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white appearance-none outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                >
+                  <option value="new">New</option>
+                  <option value="used">Used</option>
+                </select>
+              </div>
+            )}
           </div>
         </div>
 

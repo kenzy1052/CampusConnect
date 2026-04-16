@@ -21,7 +21,6 @@ export default function AdminPanel() {
     if (tab === "audit") fetchLogs();
   }, [tab]);
 
-  // 🔴 STEP 3 — FIXED: STRICT ERROR CHECKING IN FETCHALL
   const fetchAll = async () => {
     setLoading(true);
 
@@ -35,7 +34,18 @@ export default function AdminPanel() {
     ] = await Promise.all([
       supabase
         .from("reports")
-        .select("*, listings(id, title, seller_id, is_hidden)")
+        // ✅ CHANGE 3 — Include reporter identity
+        .select(
+          `
+          *,
+          listings(id, title, seller_id, is_hidden),
+          reporter:profiles!reporter_id(
+            full_name,
+            business_name,
+            email
+          )
+        `,
+        )
         .eq("is_resolved", false)
         .order("created_at", { ascending: false }),
       supabase
@@ -71,7 +81,6 @@ export default function AdminPanel() {
     const resolvedReps = resolvedRes.data;
     const usrs = usersRes.data;
 
-    // Group pending reports by listing
     const grouped = Object.values(
       repsRaw?.reduce((acc, r) => {
         const key = r.listing_id;
@@ -107,7 +116,6 @@ export default function AdminPanel() {
       .insert({ action, target_type: targetType, target_id: targetId });
   };
 
-  // ✅ STEP 2 & 5 — REPLACED DISMISS LOGIC + VERIFICATION LOGS
   const dismissReport = async (report) => {
     setActionId(report.id);
     console.log("Before dismiss:", report);
@@ -130,20 +138,20 @@ export default function AdminPanel() {
 
     console.log("After dismiss:", data);
 
-    await fetchAll(); // 🔴 MUST BE AWAITED
+    await fetchAll();
 
     setActionId(null);
   };
 
-  // Kept for the "Dismiss All on Listing" top-level button, but strictly awaited
+  // ✅ CHANGE 2 — dismissAllReports now uses the RPC
   const dismissAllReports = async (listingId) => {
     if (!window.confirm("Dismiss all reports for this listing?")) return;
     setActionId(listingId);
-    await supabase
-      .from("reports")
-      .update({ is_resolved: true, resolution_action: "dismissed" })
-      .eq("listing_id", listingId);
-    await logAdminAction("DISMISS_REPORTS", "listing", listingId);
+    const { error } = await supabase.rpc("admin_dismiss_reports_for_listing", {
+      p_listing_id: listingId,
+    });
+    if (error) alert(error.message);
+    else await logAdminAction("DISMISS_REPORTS", "listing", listingId);
     await fetchAll();
     setActionId(null);
   };
@@ -195,7 +203,6 @@ export default function AdminPanel() {
     setActionId(null);
   };
 
-  // --- NEW: TOGGLE HIDE LOGIC ---
   const toggleHide = async (listingId, hidden) => {
     setActionId(listingId);
     const { error } = await supabase.rpc("admin_set_listing_visibility", {
@@ -215,19 +222,15 @@ export default function AdminPanel() {
     setActionId(null);
   };
 
+  // ✅ CHANGE 1 — confirmListingPenalty now uses admin_confirm_listing_reports RPC
   const confirmListingPenalty = async (listingId) => {
-    if (
-      !window.confirm(
-        "Apply −10 trust penalty to seller and resolve all reports?",
-      )
-    )
-      return;
+    if (!window.confirm("Confirm all reports and penalize listing?")) return;
     setActionId(listingId);
-    const { error } = await supabase.rpc("apply_listing_penalty_once", {
+    const { error } = await supabase.rpc("admin_confirm_listing_reports", {
       p_listing_id: listingId,
     });
     if (error) alert(error.message);
-    else await logAdminAction("APPLY_PENALTY", "listing", listingId);
+    else await logAdminAction("CONFIRM_REPORTS", "listing", listingId);
     await fetchAll();
     setActionId(null);
   };
@@ -373,11 +376,8 @@ export default function AdminPanel() {
             reports.map((group) => {
               const listing = group.listing;
 
-              // ✅ STEP 4 — ADD UI DEFENSIVE FILTER (NON-NEGOTIABLE)
-              // Filters the reports inside the group map to prevent ghost entries
               const reportList = group.reports.filter((r) => !r.is_resolved);
 
-              // If all reports in this group were resolved/dismissed locally, don't render the listing box at all
               if (reportList.length === 0) return null;
 
               const busy = actionId === listing?.id;
@@ -416,7 +416,6 @@ export default function AdminPanel() {
                         </button>
                       )}
 
-                      {/* NEW: Hide/Unhide Buttons */}
                       {listing?.id &&
                         (listing.is_hidden ? (
                           <button
@@ -469,9 +468,18 @@ export default function AdminPanel() {
                           key={r.id}
                           className="flex items-center justify-between bg-slate-950/60 border border-slate-800/50 rounded-xl px-4 py-2.5 gap-3"
                         >
-                          <p className="text-xs text-slate-400 italic flex-1">
-                            "{r.reason}"
-                          </p>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-slate-400 italic">
+                              "{r.reason}"
+                            </p>
+                            {/* ✅ CHANGE 4 — Reporter identity display */}
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                              {r.reporter?.business_name ||
+                                r.reporter?.full_name ||
+                                "Unknown"}{" "}
+                              · {r.reporter?.email}
+                            </p>
+                          </div>
                           <div className="flex items-center gap-3 shrink-0">
                             <span className="text-[9px] text-slate-600">
                               {new Date(r.created_at).toLocaleDateString(
@@ -482,7 +490,6 @@ export default function AdminPanel() {
                                 },
                               )}
                             </span>
-                            {/* NEW: Individual dismiss button to utilize the admin_dismiss_report RPC */}
                             <button
                               onClick={() => dismissReport(r)}
                               disabled={isDismissing}

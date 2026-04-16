@@ -13,69 +13,190 @@ function Lightbox({ images, startIndex, onClose }) {
   const offsetStart = useRef({ x: 0, y: 0 });
   const containerRef = useRef(null);
 
+  // Touch state refs (avoid stale closures in passive listeners)
+  const scaleRef = useRef(1);
+  const offsetRef = useRef({ x: 0, y: 0 });
+  const lastTouchDist = useRef(null);
+  const lastTouchMidpoint = useRef(null);
+  const touchDragStart = useRef(null);
+  const touchOffsetStart = useRef({ x: 0, y: 0 });
+  const isTwoFinger = useRef(false);
+
   const MIN_SCALE = 1;
   const MAX_SCALE = 5;
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
+  useEffect(() => {
+    offsetRef.current = offset;
+  }, [offset]);
 
   // Reset zoom/pan when image changes
   useEffect(() => {
     setScale(1);
     setOffset({ x: 0, y: 0 });
+    scaleRef.current = 1;
+    offsetRef.current = { x: 0, y: 0 };
   }, [index]);
 
   // Keyboard navigation
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") onClose();
-      if (e.key === "ArrowRight") goNext();
-      if (e.key === "ArrowLeft") goPrev();
+      if (e.key === "ArrowRight") setIndex((i) => (i + 1) % images.length);
+      if (e.key === "ArrowLeft")
+        setIndex((i) => (i - 1 + images.length) % images.length);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [index]);
+  }, [images.length, onClose]);
 
-  // Prevent body scroll while lightbox is open
+  // Lock body scroll
   useEffect(() => {
+    const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = "";
+      document.body.style.overflow = prev;
     };
   }, []);
 
-  // Prevent passive event errors by handling preventDefault natively
+  // ── Native touch handlers (non-passive so preventDefault works on Android) ──
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const preventDefault = (e) => e.preventDefault();
+    const clamp = (val, min, max) => Math.min(max, Math.max(min, val));
 
-    // Attach non-passive listeners just to block default browser scrolling/zooming
-    container.addEventListener("wheel", preventDefault, { passive: false });
-    container.addEventListener("touchmove", preventDefault, { passive: false });
+    const getTouchDist = (touches) => {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    const getTouchMidpoint = (touches) => ({
+      x: (touches[0].clientX + touches[1].clientX) / 2,
+      y: (touches[0].clientY + touches[1].clientY) / 2,
+    });
+
+    const onTouchStart = (e) => {
+      if (e.touches.length === 2) {
+        isTwoFinger.current = true;
+        lastTouchDist.current = getTouchDist(e.touches);
+        lastTouchMidpoint.current = getTouchMidpoint(e.touches);
+        touchDragStart.current = null; // cancel any pan
+      } else if (e.touches.length === 1) {
+        isTwoFinger.current = false;
+        if (scaleRef.current > 1) {
+          touchDragStart.current = {
+            x: e.touches[0].clientX,
+            y: e.touches[0].clientY,
+          };
+          touchOffsetStart.current = { ...offsetRef.current };
+        } else {
+          touchDragStart.current = null;
+        }
+      }
+    };
+
+    const onTouchMove = (e) => {
+      e.preventDefault(); // critical — blocks browser scroll/zoom on Android
+
+      if (e.touches.length === 2 && lastTouchDist.current !== null) {
+        const newDist = getTouchDist(e.touches);
+        const newMid = getTouchMidpoint(e.touches);
+
+        // Scale delta
+        const ratio = newDist / lastTouchDist.current;
+        const nextScale = clamp(scaleRef.current * ratio, MIN_SCALE, MAX_SCALE);
+
+        // Pan delta from midpoint shift
+        const dx = newMid.x - lastTouchMidpoint.current.x;
+        const dy = newMid.y - lastTouchMidpoint.current.y;
+
+        const nextOffset = {
+          x: offsetRef.current.x + dx,
+          y: offsetRef.current.y + dy,
+        };
+
+        scaleRef.current = nextScale;
+        offsetRef.current = nextOffset;
+        setScale(nextScale);
+        setOffset(nextOffset);
+
+        lastTouchDist.current = newDist;
+        lastTouchMidpoint.current = newMid;
+      } else if (
+        e.touches.length === 1 &&
+        touchDragStart.current &&
+        scaleRef.current > 1
+      ) {
+        const dx = e.touches[0].clientX - touchDragStart.current.x;
+        const dy = e.touches[0].clientY - touchDragStart.current.y;
+        const next = {
+          x: touchOffsetStart.current.x + dx,
+          y: touchOffsetStart.current.y + dy,
+        };
+        offsetRef.current = next;
+        setOffset(next);
+      }
+    };
+
+    const onTouchEnd = (e) => {
+      if (e.touches.length < 2) {
+        lastTouchDist.current = null;
+        lastTouchMidpoint.current = null;
+        isTwoFinger.current = false;
+      }
+      if (e.touches.length === 0) {
+        touchDragStart.current = null;
+        // Snap back to MIN if somehow below
+        if (scaleRef.current <= MIN_SCALE) {
+          scaleRef.current = MIN_SCALE;
+          offsetRef.current = { x: 0, y: 0 };
+          setScale(MIN_SCALE);
+          setOffset({ x: 0, y: 0 });
+        }
+      }
+    };
+
+    // Prevent native wheel zoom
+    const onWheel = (e) => e.preventDefault();
+
+    container.addEventListener("touchstart", onTouchStart, { passive: false });
+    container.addEventListener("touchmove", onTouchMove, { passive: false });
+    container.addEventListener("touchend", onTouchEnd, { passive: false });
+    container.addEventListener("wheel", onWheel, { passive: false });
 
     return () => {
-      container.removeEventListener("wheel", preventDefault);
-      container.removeEventListener("touchmove", preventDefault);
+      container.removeEventListener("touchstart", onTouchStart);
+      container.removeEventListener("touchmove", onTouchMove);
+      container.removeEventListener("touchend", onTouchEnd);
+      container.removeEventListener("wheel", onWheel);
     };
-  }, []);
+  }, []); // stable — all state accessed via refs
 
-  const goNext = useCallback(() => {
-    setIndex((i) => (i + 1) % images.length);
-  }, [images.length]);
+  const goNext = useCallback(
+    () => setIndex((i) => (i + 1) % images.length),
+    [images.length],
+  );
+  const goPrev = useCallback(
+    () => setIndex((i) => (i - 1 + images.length) % images.length),
+    [images.length],
+  );
 
-  const goPrev = useCallback(() => {
-    setIndex((i) => (i - 1 + images.length) % images.length);
-  }, [images.length]);
-
-  // Mouse wheel zoom
-  const onWheel = (e) => {
-    // e.preventDefault() removed here to avoid the React passive event warning
-    const delta = e.deltaY < 0 ? 0.2 : -0.2;
-    setScale((s) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s + delta)));
-    // Reset pan if fully zoomed out
-    if (scale + delta <= MIN_SCALE) setOffset({ x: 0, y: 0 });
+  // Mouse wheel zoom (desktop)
+  const onWheelReact = (e) => {
+    const delta = e.deltaY < 0 ? 0.25 : -0.25;
+    setScale((s) => {
+      const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, s + delta));
+      if (next <= MIN_SCALE) setOffset({ x: 0, y: 0 });
+      return next;
+    });
   };
 
-  // Drag to pan
+  // Mouse drag (desktop)
   const onMouseDown = (e) => {
     if (scale <= 1) return;
     e.preventDefault();
@@ -86,11 +207,9 @@ function Lightbox({ images, startIndex, onClose }) {
 
   const onMouseMove = (e) => {
     if (!dragging || !dragStart.current) return;
-    const dx = e.clientX - dragStart.current.x;
-    const dy = e.clientY - dragStart.current.y;
     setOffset({
-      x: offsetStart.current.x + dx,
-      y: offsetStart.current.y + dy,
+      x: offsetStart.current.x + (e.clientX - dragStart.current.x),
+      y: offsetStart.current.y + (e.clientY - dragStart.current.y),
     });
   };
 
@@ -99,67 +218,29 @@ function Lightbox({ images, startIndex, onClose }) {
     dragStart.current = null;
   };
 
-  // Touch pinch zoom
-  const lastTouchDist = useRef(null);
-  const onTouchStart = (e) => {
-    if (e.touches.length === 2) {
-      const dx = e.touches[0].clientX - e.touches[1].clientX;
-      const dy = e.touches[0].clientY - e.touches[1].clientY;
-      lastTouchDist.current = Math.sqrt(dx * dx + dy * dy);
-    } else if (e.touches.length === 1 && scale > 1) {
-      dragStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      offsetStart.current = { ...offset };
-    }
-  };
-
-  const onTouchMove = (e) => {
-    // e.preventDefault() removed here to avoid the React passive event warning
-    if (e.touches.length === 2 && lastTouchDist.current) {
-      const dx = e.touches[0].clientX - e.touches[1].clientX;
-      const dy = e.touches[0].clientY - e.touches[1].clientY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const delta = (dist - lastTouchDist.current) * 0.01;
-      setScale((s) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s + delta)));
-      lastTouchDist.current = dist;
-    } else if (e.touches.length === 1 && scale > 1 && dragStart.current) {
-      const dx = e.touches[0].clientX - dragStart.current.x;
-      const dy = e.touches[0].clientY - dragStart.current.y;
-      setOffset({
-        x: offsetStart.current.x + dx,
-        y: offsetStart.current.y + dy,
-      });
-    }
-  };
-
-  const onTouchEnd = () => {
-    lastTouchDist.current = null;
-    dragStart.current = null;
-    if (scale <= MIN_SCALE) setOffset({ x: 0, y: 0 });
-  };
-
   const resetZoom = () => {
     setScale(1);
     setOffset({ x: 0, y: 0 });
   };
-
   const zoomIn = () => setScale((s) => Math.min(MAX_SCALE, s + 0.5));
   const zoomOut = () => {
-    const next = Math.max(MIN_SCALE, scale - 0.5);
-    setScale(next);
-    if (next <= MIN_SCALE) setOffset({ x: 0, y: 0 });
+    setScale((s) => {
+      const next = Math.max(MIN_SCALE, s - 0.5);
+      if (next <= MIN_SCALE) setOffset({ x: 0, y: 0 });
+      return next;
+    });
   };
 
   return (
-    <div className="fixed inset-0 z-[999] bg-black/95 flex flex-col select-none">
+    <div className="fixed inset-0 z-[999] bg-black/95 flex flex-col select-none touch-none">
       {/* TOP BAR */}
-      <div className="flex items-center justify-between px-5 py-3 shrink-0 border-b border-white/5">
-        {/* Image counter */}
-        <span className="text-slate-400 text-xs font-bold">
+      <div className="flex items-center justify-between px-4 py-2.5 shrink-0 border-b border-white/5 safe-area-top">
+        <span className="text-slate-400 text-xs font-bold tabular-nums">
           {index + 1} / {images.length}
         </span>
 
-        {/* Zoom controls */}
-        <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1">
+        {/* Zoom controls — hidden on mobile to avoid clutter */}
+        <div className="hidden sm:flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-xl px-2 py-1">
           <button
             onClick={zoomOut}
             disabled={scale <= MIN_SCALE}
@@ -182,7 +263,11 @@ function Lightbox({ images, startIndex, onClose }) {
           </button>
         </div>
 
-        {/* Close */}
+        {/* Mobile: just show zoom % */}
+        <span className="sm:hidden text-[11px] font-black text-slate-500">
+          {Math.round(scale * 100)}%
+        </span>
+
         <button
           onClick={onClose}
           className="w-9 h-9 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition-all text-lg"
@@ -195,14 +280,11 @@ function Lightbox({ images, startIndex, onClose }) {
       <div
         ref={containerRef}
         className="flex-1 relative overflow-hidden flex items-center justify-center"
-        onWheel={onWheel}
+        onWheel={onWheelReact}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseUp}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
         style={{
           cursor: scale > 1 ? (dragging ? "grabbing" : "grab") : "default",
         }}
@@ -213,18 +295,24 @@ function Lightbox({ images, startIndex, onClose }) {
           draggable={false}
           style={{
             transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
-            transition: dragging ? "none" : "transform 0.15s ease",
+            transition: dragging ? "none" : "transform 0.12s ease-out",
             maxWidth: "100%",
             maxHeight: "100%",
             objectFit: "contain",
             userSelect: "none",
+            willChange: "transform",
+            touchAction: "none",
           }}
         />
 
-        {/* Zoom hint (shown only at scale 1) */}
         {scale === 1 && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] text-slate-600 font-bold uppercase tracking-widest pointer-events-none">
-            Scroll to zoom · Drag to pan
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none">
+            <span className="text-[10px] text-slate-600 font-bold uppercase tracking-widest hidden sm:block">
+              Scroll to zoom · Drag to pan
+            </span>
+            <span className="text-[10px] text-slate-600 font-bold uppercase tracking-widest sm:hidden">
+              Pinch to zoom
+            </span>
           </div>
         )}
 
@@ -236,7 +324,7 @@ function Lightbox({ images, startIndex, onClose }) {
                 e.stopPropagation();
                 goPrev();
               }}
-              className="absolute left-4 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/60 border border-white/10 backdrop-blur-sm text-white text-2xl flex items-center justify-center hover:bg-black/80 transition-all z-10"
+              className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-black/60 border border-white/10 backdrop-blur-sm text-white text-2xl flex items-center justify-center hover:bg-black/80 active:scale-95 transition-all z-10"
             >
               ‹
             </button>
@@ -245,7 +333,7 @@ function Lightbox({ images, startIndex, onClose }) {
                 e.stopPropagation();
                 goNext();
               }}
-              className="absolute right-4 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/60 border border-white/10 backdrop-blur-sm text-white text-2xl flex items-center justify-center hover:bg-black/80 transition-all z-10"
+              className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-black/60 border border-white/10 backdrop-blur-sm text-white text-2xl flex items-center justify-center hover:bg-black/80 active:scale-95 transition-all z-10"
             >
               ›
             </button>
@@ -255,13 +343,13 @@ function Lightbox({ images, startIndex, onClose }) {
 
       {/* THUMBNAIL STRIP */}
       {images.length > 1 && (
-        <div className="shrink-0 border-t border-white/5 px-4 py-3">
-          <div className="flex gap-2 justify-center overflow-x-auto pb-1">
+        <div className="shrink-0 border-t border-white/5 px-4 py-2.5">
+          <div className="flex gap-2 justify-center overflow-x-auto pb-0.5 scrollbar-hide">
             {images.map((img, i) => (
               <button
                 key={i}
                 onClick={() => setIndex(i)}
-                className={`shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 transition-all ${
+                className={`shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-lg overflow-hidden border-2 transition-all active:scale-95 ${
                   i === index
                     ? "border-indigo-500 opacity-100"
                     : "border-transparent opacity-40 hover:opacity-70"
@@ -284,6 +372,7 @@ function Lightbox({ images, startIndex, onClose }) {
 // ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 export default function ListingDetail({ listing, onBack }) {
   const { user } = useAuth();
+  const [listingData, setListingData] = useState(listing);
   const [images, setImages] = useState([]);
   const [current, setCurrent] = useState(0);
   const [showContact, setShowContact] = useState(false);
@@ -291,11 +380,13 @@ export default function ListingDetail({ listing, onBack }) {
   const [phones, setPhones] = useState([]);
   const [whatsapp, setWhatsapp] = useState(null);
   const [reportStatus, setReportStatus] = useState(null);
-  const [lightboxIndex, setLightboxIndex] = useState(null); // null = closed
+  const [lightboxIndex, setLightboxIndex] = useState(null);
 
-  const isOwnListing = user?.id === listing.seller_id;
+  const isOwnListing = user?.id === listingData.seller_id;
 
+  // Fresh fetch — don't trust passed props
   useEffect(() => {
+    fetchListing();
     fetchImages();
     fetchContacts();
     recordView();
@@ -313,6 +404,15 @@ export default function ListingDetail({ listing, onBack }) {
     };
     if (user) checkReportStatus();
   }, [listing.id, user]);
+
+  const fetchListing = async () => {
+    const { data } = await supabase
+      .from("discovery_feed")
+      .select("*")
+      .eq("id", listing.id)
+      .single();
+    if (data) setListingData(data);
+  };
 
   const recordView = async () => {
     try {
@@ -363,22 +463,45 @@ export default function ListingDetail({ listing, onBack }) {
   };
 
   const getPriceDisplay = () => {
-    if (listing.price !== null) return "GH₵ " + listing.price;
-    if (listing.price_min && listing.price_max)
-      return "GH₵ " + listing.price_min + " – " + listing.price_max;
-    if (listing.price_min) return "From GH₵ " + listing.price_min;
-    if (listing.price_max) return "Up to GH₵ " + listing.price_max;
+    if (listingData.price !== null) return "GH₵ " + listingData.price;
+    if (listingData.price_min && listingData.price_max)
+      return "GH₵ " + listingData.price_min + " – " + listingData.price_max;
+    if (listingData.price_min) return "From GH₵ " + listingData.price_min;
+    if (listingData.price_max) return "Up to GH₵ " + listingData.price_max;
     return "Ask for price";
   };
 
-  const isService = listing.listing_type === "service";
-  const initial = (listing.seller_name || "U")[0].toUpperCase();
+  // Avatar: up to 2 initials
+  const initials = (listingData?.seller_name || "U")
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  // Created date
+  const createdDate = listingData.created_at
+    ? new Date(listingData.created_at).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      })
+    : null;
+
+  // WhatsApp — URL-encoded pre-filled message
+  const whatsappMessage = encodeURIComponent(
+    `Hi, I am interested in "${listingData.title}" on CampusConnect. Is it still available?`,
+  );
+  const whatsappLink = whatsapp
+    ? `https://wa.me/233${whatsapp}?text=${whatsappMessage}`
+    : null;
+
+  const isService = listingData.listing_type === "service";
   const prev = () => setCurrent((c) => (c - 1 + images.length) % images.length);
   const next = () => setCurrent((c) => (c + 1) % images.length);
 
   return (
     <>
-      {/* Lightbox — rendered at root level */}
       {lightboxIndex !== null && (
         <Lightbox
           images={images}
@@ -407,10 +530,9 @@ export default function ListingDetail({ listing, onBack }) {
                   <img
                     src={images[current].image_url}
                     className="w-full h-full object-cover transition-all duration-300"
-                    alt={listing.title}
+                    alt={listingData.title}
                   />
 
-                  {/* Click to open lightbox overlay */}
                   <button
                     onClick={() => setLightboxIndex(current)}
                     className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/20 transition-all duration-200"
@@ -441,7 +563,7 @@ export default function ListingDetail({ listing, onBack }) {
                           e.stopPropagation();
                           prev();
                         }}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm text-white text-xl flex items-center justify-center hover:bg-black/80 transition-all z-10"
+                        className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm text-white text-xl flex items-center justify-center hover:bg-black/80 active:scale-95 transition-all z-10"
                       >
                         ‹
                       </button>
@@ -450,7 +572,7 @@ export default function ListingDetail({ listing, onBack }) {
                           e.stopPropagation();
                           next();
                         }}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm text-white text-xl flex items-center justify-center hover:bg-black/80 transition-all z-10"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm text-white text-xl flex items-center justify-center hover:bg-black/80 active:scale-95 transition-all z-10"
                       >
                         ›
                       </button>
@@ -500,7 +622,7 @@ export default function ListingDetail({ listing, onBack }) {
                     key={i}
                     onClick={() => setCurrent(i)}
                     className={
-                      "w-20 h-20 rounded-xl overflow-hidden border-2 transition-all relative group/thumb " +
+                      "w-20 h-20 rounded-xl overflow-hidden border-2 transition-all relative group/thumb active:scale-95 " +
                       (i === current
                         ? "border-indigo-500"
                         : "border-slate-800 opacity-50 hover:opacity-100")
@@ -511,7 +633,6 @@ export default function ListingDetail({ listing, onBack }) {
                       className="w-full h-full object-cover"
                       alt=""
                     />
-                    {/* Zoom icon on thumb hover */}
                     <div
                       onClick={(e) => {
                         e.stopPropagation();
@@ -531,55 +652,78 @@ export default function ListingDetail({ listing, onBack }) {
                 Description
               </p>
               <p className="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap">
-                {listing.description || "No description provided."}
+                {listingData.description || "No description provided."}
               </p>
             </div>
           </div>
 
           {/* RIGHT — INFO & ACTIONS */}
           <div className="space-y-4 md:sticky md:top-6">
+            {/* TITLE & PRICE */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">
-                {listing.category_name}
+                {listingData.category_name}
               </p>
               <h1 className="text-2xl font-black text-white leading-tight mb-5">
-                {listing.title}
+                {listingData.title}
               </h1>
               <div className="text-3xl font-black text-white">
                 {getPriceDisplay()}
               </div>
-              {listing.negotiable && (
+              {listingData.negotiable && (
                 <span className="inline-flex mt-3 text-[9px] font-black uppercase tracking-widest text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-3 py-1 rounded-full">
                   Price negotiable
                 </span>
               )}
+
+              {/* Condition + View count row */}
+              <div className="flex items-center gap-4 mt-4 pt-4 border-t border-slate-800">
+                <span className="text-xs text-slate-400">
+                  Condition:{" "}
+                  <span className="text-white font-semibold">
+                    {listingData.condition || "N/A"}
+                  </span>
+                </span>
+                <span className="text-slate-700">·</span>
+                <p className="text-xs text-slate-500">
+                  {listingData.view_count || 0} views
+                </p>
+              </div>
+
+              {/* Posted date */}
+              {createdDate && (
+                <p className="text-xs text-slate-500 mt-2">
+                  Posted on {createdDate}
+                </p>
+              )}
             </div>
 
-            {/* SELLER CARD — with avatar support */}
+            {/* SELLER CARD */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">
                 Seller
               </p>
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-indigo-600 flex items-center justify-center text-white font-black text-xl shrink-0 overflow-hidden border-2 border-slate-700">
-                  {listing.seller_avatar_url ? (
+                {/* Avatar with initials fallback */}
+                <div className="w-12 h-12 rounded-full overflow-hidden bg-indigo-600 flex items-center justify-center text-white font-black text-sm shrink-0 border-2 border-slate-700">
+                  {listingData?.seller_avatar_url ? (
                     <img
-                      src={listing.seller_avatar_url}
-                      alt={listing.seller_name}
+                      src={listingData.seller_avatar_url}
+                      alt={listingData.seller_name}
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    initial
+                    initials
                   )}
                 </div>
                 <div className="min-w-0">
                   <div className="font-bold text-white truncate">
-                    {listing.seller_name}
+                    {listingData.seller_name}
                   </div>
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <span className="text-yellow-400 text-xs">★</span>
                     <span className="text-sm font-bold text-white">
-                      {listing.trust_score || 50}
+                      {listingData.trust_score || 50}
                     </span>
                     <span className="text-xs text-slate-600">/ 100 trust</span>
                   </div>
@@ -595,7 +739,7 @@ export default function ListingDetail({ listing, onBack }) {
               {!showContact ? (
                 <button
                   onClick={handleRevealContact}
-                  className="w-full bg-slate-800 hover:bg-slate-700 text-white py-3 rounded-xl font-bold text-sm transition-all border border-slate-700"
+                  className="w-full bg-slate-800 hover:bg-slate-700 active:scale-[0.98] text-white py-3 rounded-xl font-bold text-sm transition-all border border-slate-700"
                 >
                   Reveal Contact Info
                 </button>
@@ -619,13 +763,15 @@ export default function ListingDetail({ listing, onBack }) {
                   ))}
                 </div>
               )}
-              {whatsapp && (
+
+              {/* WhatsApp — URL-encoded pre-filled message */}
+              {whatsappLink && (
                 <a
-                  href={"https://wa.me/233" + whatsapp}
+                  href={whatsappLink}
                   target="_blank"
                   rel="noreferrer"
                   onClick={recordContact}
-                  className="flex items-center justify-center gap-2 w-full bg-[#25D366] hover:bg-[#1fba59] text-white py-3.5 rounded-xl font-black text-sm transition-all"
+                  className="flex items-center justify-center gap-2 w-full bg-[#25D366] hover:bg-[#1fba59] active:scale-[0.98] text-white py-3.5 rounded-xl font-black text-sm transition-all"
                 >
                   <span>💬</span> Chat on WhatsApp
                 </a>
@@ -666,7 +812,7 @@ export default function ListingDetail({ listing, onBack }) {
 
       {showReport && (
         <ReportModal
-          listing={listing}
+          listing={listingData}
           onClose={() => setShowReport(false)}
           onSuccess={() => setReportStatus("submitted")}
         />

@@ -16,7 +16,6 @@ export default function MyListings({ onCreateListing }) {
 
   const fetchMyListings = async () => {
     setLoading(true);
-    // Updated to use discovery_feed for pre-computed metrics
     const { data, error } = await supabase
       .from("discovery_feed")
       .select(
@@ -32,7 +31,6 @@ export default function MyListings({ onCreateListing }) {
     setLoading(false);
   };
 
-  // --- IMPROVED STATUS LOGIC ---
   const getStatus = (listing) => {
     if (listing.is_hidden) return "Hidden";
     if (!listing.is_active && listing.sold_at) return "Sold";
@@ -48,18 +46,41 @@ export default function MyListings({ onCreateListing }) {
     return "text-emerald-400";
   };
 
-  // --- ACTIONS ---
+  // --- UPDATED DELETE (NO LEAKS) ---
   const deleteListing = async (listing) => {
     if (!window.confirm(`Permanently delete "${listing.title}"?`)) return;
+
     setActionId(listing.id);
+
+    // 1. Get images associated with listing
+    const { data: images } = await supabase
+      .from("listing_images")
+      .select("image_url")
+      .eq("listing_id", listing.id);
+
+    // 2. Wipe from storage bucket
+    if (images?.length) {
+      const paths = images.map((img) => {
+        // Handle full URLs or just paths depending on your storage setup
+        return img.image_url.split("/").pop();
+      });
+
+      await supabase.storage.from("listing-images").remove(paths);
+    }
+
+    // 3. Delete from DB
     const { error } = await supabase
       .from("listings")
       .delete()
       .eq("id", listing.id)
       .eq("seller_id", user.id);
 
-    if (error) alert("Failed: " + error.message);
-    else setListings((prev) => prev.filter((l) => l.id !== listing.id));
+    if (error) {
+      alert("Failed: " + error.message);
+    } else {
+      setListings((prev) => prev.filter((l) => l.id !== listing.id));
+    }
+
     setActionId(null);
   };
 
@@ -77,21 +98,8 @@ export default function MyListings({ onCreateListing }) {
       await supabase.rpc("increment_trust_on_sale", {
         p_listing_id: listing.id,
       });
-      fetchMyListings(); // Corrected from fetchAll()
+      fetchMyListings();
     }
-    setActionId(null);
-  };
-
-  const archiveListing = async (listing) => {
-    if (!window.confirm(`Archive "${listing.title}"?`)) return;
-    setActionId(listing.id);
-    const { error } = await supabase
-      .from("listings")
-      .update({ is_active: false })
-      .eq("id", listing.id);
-
-    if (error) alert("Failed: " + error.message);
-    else fetchMyListings();
     setActionId(null);
   };
 
@@ -152,20 +160,15 @@ export default function MyListings({ onCreateListing }) {
                       : "border-slate-800/30 opacity-60"
                 }`}
               >
-                {/* VIOLATION BANNER */}
                 {!listing.is_active && !listing.sold_at && (
                   <div className="w-full px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[11px] font-bold">
                     ⚠️ This listing was removed for violating guidelines.
                   </div>
                 )}
 
-                {/* HIDDEN WARNING BANNER */}
                 {listing.is_hidden && (
                   <div className="w-full px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[11px] font-bold flex items-center justify-between">
-                    <span>
-                      ⚠️ Hidden due to multiple reports. Review policy
-                      violations.
-                    </span>
+                    <span>⚠️ Hidden due to reports.</span>
                     <button
                       onClick={() => alert("Review Flow coming soon.")}
                       className="text-red-300 text-[10px] underline hover:text-red-200"
@@ -232,13 +235,7 @@ export default function MyListings({ onCreateListing }) {
                           {busy ? "..." : "Mark Sold"}
                         </button>
                       )}
-                      <button
-                        onClick={() => archiveListing(listing)}
-                        disabled={busy || !listing.is_active}
-                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all border border-slate-700 disabled:opacity-30"
-                      >
-                        Archive
-                      </button>
+
                       <button
                         onClick={() => deleteListing(listing)}
                         disabled={busy}
