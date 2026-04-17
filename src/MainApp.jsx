@@ -1,21 +1,19 @@
-import { useRef, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useDiscoveryFeed } from "./hooks/useDiscoveryFeed";
-import { FeedList } from "./components/Feed/FeedList";
 import { FeedFilters } from "./components/Feed/FeedFilters";
-import { CreateListing } from "./components/Feed/CreateListing";
-import ListingDetail from "./components/Feed/ListingDetail";
-import Profile from "./components/Profile/Profile";
-import AdminPanel from "./components/Admin/AdminPanel";
-import MyListings from "./components/Profile/MyListings"; // Ensure this import is correct
 import { useAuth } from "./context/AuthContext";
 
 export default function MainApp() {
   const { user, profile, logout } = useAuth();
-  const [activeView, setActiveView] = useState("feed");
-  const [selectedListing, setSelectedListing] = useState(null);
+  const navigate = useNavigate();
+  const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
 
   const isAdmin = profile?.role === "admin";
+  const isFeedView = location.pathname === "/";
+  const isMyListingsView = location.pathname === "/mylistings";
+  const isAdminView = location.pathname === "/admin";
 
   const {
     listings,
@@ -44,15 +42,16 @@ export default function MainApp() {
           entries[0].isIntersecting &&
           !loading &&
           hasMore &&
-          activeView === "feed"
-        )
+          isFeedView
+        ) {
           loadMore();
+        }
       },
       { rootMargin: "150px" },
     );
     if (el) observer.observe(el);
     return () => el && observer.unobserve(el);
-  }, [loading, hasMore, loadMore, activeView]);
+  }, [loading, hasMore, loadMore, isFeedView]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -60,6 +59,14 @@ export default function MainApp() {
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, [menuOpen]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setMenuOpen(false);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.pathname]);
 
   const initials = (profile?.business_name || profile?.full_name || "U")
     .split(" ")
@@ -69,19 +76,18 @@ export default function MainApp() {
     .toUpperCase();
 
   const handleBackToFeed = () => {
-    setActiveView("feed");
-    setSelectedListing(null);
+    navigate("/");
   };
 
   const openDetailView = (listing) => {
-    setSelectedListing(listing);
-    setActiveView("detail");
+    navigate(`/listing/${listing.id}`, {
+      state: { listing },
+    });
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans">
       <div className="w-full max-w-7xl mx-auto px-4 py-6 md:py-8">
-        {/* ── HEADER ── */}
         <header className="mb-6 flex items-center justify-between gap-4">
           <button
             onClick={handleBackToFeed}
@@ -91,30 +97,27 @@ export default function MainApp() {
           </button>
 
           <div className="flex items-center gap-4">
-            {/* My Listings Button */}
-            {activeView !== "mylistings" && (
+            {!isMyListingsView && (
               <button
-                onClick={() => setActiveView("mylistings")}
+                onClick={() => navigate("/mylistings")}
                 className="text-sm font-bold text-slate-300 hover:text-white transition-colors"
               >
                 My Listings
               </button>
             )}
 
-            {/* Admin Panel Button */}
-            {isAdmin && activeView !== "admin" && (
+            {isAdmin && !isAdminView && (
               <button
-                onClick={() => setActiveView("admin")}
+                onClick={() => navigate("/admin")}
                 className="text-sm font-bold text-red-400 hover:text-red-300 transition-colors"
               >
                 Admin Panel
               </button>
             )}
 
-            {/* Post / Back button */}
-            {activeView === "feed" ? (
+            {isFeedView ? (
               <button
-                onClick={() => setActiveView("create")}
+                onClick={() => navigate("/create")}
                 className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all"
               >
                 + Post
@@ -124,11 +127,10 @@ export default function MainApp() {
                 onClick={handleBackToFeed}
                 className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all"
               >
-                ← Back
+                Back
               </button>
             )}
 
-            {/* Profile avatar + dropdown */}
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
                 onClick={() => setMenuOpen((p) => !p)}
@@ -156,11 +158,11 @@ export default function MainApp() {
                   <button
                     onClick={() => {
                       setMenuOpen(false);
-                      setActiveView("profile");
+                      navigate("/profile");
                     }}
                     className="w-full text-left px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition-colors flex items-center gap-2"
                   >
-                    <span>⚙️</span> Account Settings
+                    <span>Settings</span> Account Settings
                   </button>
                   <button
                     onClick={() => {
@@ -169,7 +171,7 @@ export default function MainApp() {
                     }}
                     className="w-full text-left px-4 py-3 text-sm text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-2 border-t border-slate-800"
                   >
-                    <span>→</span> Sign Out
+                    <span>Out</span> Sign Out
                   </button>
                 </div>
               )}
@@ -177,8 +179,7 @@ export default function MainApp() {
           </div>
         </header>
 
-        {/* ── FILTERS ── */}
-        {activeView === "feed" && (
+        {isFeedView && (
           <FeedFilters
             categories={categories}
             filter={filter}
@@ -196,51 +197,19 @@ export default function MainApp() {
           </div>
         )}
 
-        {/* ── VIEWS ── */}
-        {isAdmin && activeView === "admin" && <AdminPanel />}
-
-        {activeView === "mylistings" && (
-          <MyListings onCreateListing={() => setActiveView("create")} />
-        )}
-
-        {activeView === "create" && (
-          <CreateListing
-            user={user}
-            onCancel={handleBackToFeed}
-            onSuccess={() => {
-              handleBackToFeed();
-              refetch();
-            }}
-          />
-        )}
-
-        {activeView === "profile" && <Profile />}
-
-        {activeView === "detail" && selectedListing && (
-          <ListingDetail listing={selectedListing} onBack={handleBackToFeed} />
-        )}
-
-        {activeView === "feed" && (
-          <>
-            {isInitialLoading ? (
-              <div className="flex justify-center py-32">
-                <div className="w-10 h-10 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
-              </div>
-            ) : (
-              <FeedList listings={listings} onListingClick={openDetailView} />
-            )}
-
-            <div
-              ref={observerTarget}
-              className="h-32 flex justify-center items-center"
-            >
-              {loading && <p className="text-xs text-indigo-400">Loading...</p>}
-              {!hasMore && listings.length > 0 && (
-                <p className="text-xs text-slate-700">You've seen everything</p>
-              )}
-            </div>
-          </>
-        )}
+        <Outlet
+          context={{
+            user,
+            isAdmin,
+            listings,
+            loading,
+            isInitialLoading,
+            hasMore,
+            observerTarget,
+            openDetailView,
+            refetch,
+          }}
+        />
       </div>
     </div>
   );
