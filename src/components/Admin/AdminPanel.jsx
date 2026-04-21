@@ -1,8 +1,14 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabaseClient";
+import { useAuth } from "../../context/AuthContext";
 import ListingDetail from "../Feed/ListingDetail";
 
 export default function AdminPanel() {
+  // BUG FIX: AdminPanel was missing useAuth entirely. This caused admin_id to
+  // always be null in every frontend-generated audit log row, making the audit
+  // trail useless for accountability. We now pass user.id explicitly.
+  const { user } = useAuth();
+
   const [reports, setReports] = useState([]);
   const [resolvedReports, setResolvedReports] = useState([]);
   const [users, setUsers] = useState([]);
@@ -34,7 +40,6 @@ export default function AdminPanel() {
     ] = await Promise.all([
       supabase
         .from("reports")
-        // ✅ CHANGE 3 — Include reporter identity
         .select(
           `
           *,
@@ -110,15 +115,23 @@ export default function AdminPanel() {
     setLogs(data || []);
   };
 
+  // BUG FIX: logAdminAction now includes admin_id (user.id).
+  // Previously admin_id was always null — every audit log row was anonymous.
+  // IMPORTANT: Only call this for actions whose SQL RPC does NOT already
+  // log internally. The functions admin_delete_listing and admin_dismiss_report
+  // write their own audit row via auth.uid() — calling this after them would
+  // create a duplicate row (one with admin_id, one null). Those two are omitted.
   const logAdminAction = async (action, targetType, targetId) => {
-    await supabase
-      .from("admin_audit_logs")
-      .insert({ action, target_type: targetType, target_id: targetId });
+    await supabase.from("admin_audit_logs").insert({
+      admin_id: user?.id ?? null,
+      action,
+      target_type: targetType,
+      target_id: targetId,
+    });
   };
 
   const dismissReport = async (report) => {
     setActionId(report.id);
-    console.log("Before dismiss:", report);
 
     const { error } = await supabase.rpc("admin_dismiss_report", {
       p_report_id: report.id,
@@ -130,28 +143,28 @@ export default function AdminPanel() {
       return;
     }
 
-    const { data } = await supabase
-      .from("reports")
-      .select("*")
-      .eq("id", report.id)
-      .single();
-
-    console.log("After dismiss:", data);
+    // BUG FIX: Removed the extra logAdminAction("DISMISS_REPORTS") call here.
+    // admin_dismiss_report() already inserts its own audit log row internally
+    // (with action='dismiss_report' and the correct admin_id via auth.uid()).
+    // The old code called logAdminAction afterwards, creating a second row with
+    // admin_id=null. Only one row per action is correct.
 
     await fetchAll();
-
     setActionId(null);
   };
 
-  // ✅ CHANGE 2 — dismissAllReports now uses the RPC
   const dismissAllReports = async (listingId) => {
     if (!window.confirm("Dismiss all reports for this listing?")) return;
     setActionId(listingId);
     const { error } = await supabase.rpc("admin_dismiss_reports_for_listing", {
       p_listing_id: listingId,
     });
-    if (error) alert(error.message);
-    else await logAdminAction("DISMISS_REPORTS", "listing", listingId);
+    if (error) {
+      alert(error.message);
+    } else {
+      // admin_dismiss_reports_for_listing does NOT log internally, so we log here.
+      await logAdminAction("DISMISS_REPORTS", "listing", listingId);
+    }
     await fetchAll();
     setActionId(null);
   };
@@ -197,8 +210,14 @@ export default function AdminPanel() {
     const { error } = await supabase.rpc("admin_delete_listing", {
       p_listing_id: listingId,
     });
-    if (error) alert(error.message);
-    else await logAdminAction("DELETE_LISTING", "listing", listingId);
+    if (error) {
+      alert(error.message);
+    }
+    // BUG FIX: Removed logAdminAction("DELETE_LISTING") call here.
+    // admin_delete_listing() already writes its own audit row with the correct
+    // admin_id from auth.uid(). Calling logAdminAction after created a duplicate
+    // row (action='DELETE_LISTING', admin_id=null) visible in the Audit Log tab.
+
     await fetchAll();
     setActionId(null);
   };
@@ -210,52 +229,67 @@ export default function AdminPanel() {
       p_hidden: hidden,
     });
 
-    if (error) alert(error.message);
-    else
+    if (error) {
+      alert(error.message);
+    } else {
+      // admin_set_listing_visibility does NOT log internally, so we log here.
       await logAdminAction(
         hidden ? "HIDE_LISTING" : "UNHIDE_LISTING",
         "listing",
         listingId,
       );
+    }
 
     await fetchAll();
     setActionId(null);
   };
 
-  // ✅ CHANGE 1 — confirmListingPenalty now uses admin_confirm_listing_reports RPC
   const confirmListingPenalty = async (listingId) => {
     if (!window.confirm("Confirm all reports and penalize listing?")) return;
+
     setActionId(listingId);
+
     const { error } = await supabase.rpc("admin_confirm_listing_reports", {
       p_listing_id: listingId,
     });
-    if (error) alert(error.message);
-    else await logAdminAction("CONFIRM_REPORTS", "listing", listingId);
+
+    if (error) {
+      alert(error.message);
+      setActionId(null);
+      return;
+    }
+
+    // ❌ DO NOT LOG HERE — SQL HANDLES IT
+
     await fetchAll();
     setActionId(null);
   };
 
   const resetTrust = async (userId, name) => {
     if (!window.confirm(`Reset ${name}'s trust score to 25?`)) return;
-    await supabase
-      .from("profiles")
-      .update({ trust_score: 25 })
-      .eq("id", userId);
-    await logAdminAction("RESET_USER_TRUST", "profile", userId);
+
+    const { error } = await supabase.rpc("admin_reset_trust", {
+      p_user_id: userId,
+    });
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
     await fetchAll();
   };
 
   const toggleSuspension = async (u) => {
-    const newState = !u.is_suspended;
-    await supabase
-      .from("profiles")
-      .update({ is_suspended: newState })
-      .eq("id", u.id);
-    await logAdminAction(
-      newState ? "SUSPEND_USER" : "UNSUSPEND_USER",
-      "profile",
-      u.id,
-    );
+    const { error } = await supabase.rpc("admin_toggle_suspension", {
+      p_user_id: u.id,
+    });
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
     await fetchAll();
   };
 
@@ -375,18 +409,14 @@ export default function AdminPanel() {
           ) : (
             reports.map((group) => {
               const listing = group.listing;
-
               const reportList = group.reports.filter((r) => !r.is_resolved);
-
               if (reportList.length === 0) return null;
-
               const busy = actionId === listing?.id;
               return (
                 <div
                   key={listing?.id || Math.random()}
                   className="bg-slate-900 border border-slate-800 rounded-2xl p-6"
                 >
-                  {/* LISTING HEADER */}
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-5">
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
@@ -405,7 +435,6 @@ export default function AdminPanel() {
                       </p>
                     </div>
 
-                    {/* ACTION BUTTONS */}
                     <div className="flex flex-wrap gap-2 shrink-0">
                       {listing?.id && (
                         <button
@@ -459,7 +488,6 @@ export default function AdminPanel() {
                     </div>
                   </div>
 
-                  {/* INDIVIDUAL REPORT REASONS */}
                   <div className="space-y-2 border-t border-slate-800/50 pt-4">
                     {reportList.map((r) => {
                       const isDismissing = actionId === r.id;
@@ -472,7 +500,6 @@ export default function AdminPanel() {
                             <p className="text-xs text-slate-400 italic">
                               "{r.reason}"
                             </p>
-                            {/* ✅ CHANGE 4 — Reporter identity display */}
                             <p className="text-[10px] text-slate-500 mt-0.5">
                               {r.reporter?.business_name ||
                                 r.reporter?.full_name ||

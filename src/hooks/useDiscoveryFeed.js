@@ -15,7 +15,7 @@ export function useDiscoveryFeed() {
   const [error, setError] = useState(null);
   const [hasMore, setHasMore] = useState(true);
   const [cursor, setCursor] = useState(null);
-  const [resetKey, setResetKey] = useState(0); // ✅ FIX: reset trigger
+  const [resetKey, setResetKey] = useState(0);
 
   const requestIdRef = useRef(0);
 
@@ -46,6 +46,11 @@ export function useDiscoveryFeed() {
         let query = supabase
           .from("discovery_feed")
           .select("*")
+          // BUG FIX: Only show listings that are active, not hidden, and not deleted.
+          // Without these filters, hidden/removed listings were visible to all users.
+          .eq("is_active", true)
+          .eq("is_hidden", false)
+          .eq("is_deleted", false)
           .order("visibility_score", { ascending: false })
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
@@ -102,7 +107,7 @@ export function useDiscoveryFeed() {
       }
     },
     [filter, categoryId, debouncedSearch],
-  ); // ✅ cursor removed from deps
+  );
 
   // --- RESET ON FILTER / SEARCH / resetKey CHANGE ---
   useEffect(() => {
@@ -110,15 +115,15 @@ export function useDiscoveryFeed() {
     setCursor(null);
     setHasMore(true);
     setIsInitialLoading(true);
-    fetchListings(true, null); // pass null so cursor override is clean
-  }, [filter, categoryId, debouncedSearch, resetKey]); // ✅ resetKey added
+    fetchListings(true, null);
+  }, [filter, categoryId, debouncedSearch, resetKey]);
 
   // --- LOAD MORE ---
   const loadMore = () => {
     if (!loading && hasMore) fetchListings(false, cursor);
   };
 
-  // --- REFETCH --- ✅ just bumps resetKey, no stale closure possible
+  // --- REFETCH ---
   const refetch = useCallback(() => {
     setResetKey((k) => k + 1);
   }, []);

@@ -46,7 +46,6 @@ export default function MyListings({ onCreateListing }) {
     return "text-emerald-400";
   };
 
-  // --- UPDATED DELETE (NO LEAKS) ---
   const deleteListing = async (listing) => {
     if (!window.confirm(`Permanently delete "${listing.title}"?`)) return;
 
@@ -59,13 +58,29 @@ export default function MyListings({ onCreateListing }) {
       .eq("listing_id", listing.id);
 
     // 2. Wipe from storage bucket
+    // BUG FIX: Previously used `.split("/").pop()` which only extracted the
+    // filename, not the full path (listingId/filename). This caused storage
+    // to silently skip the deletion — leaving orphaned files in the bucket.
+    // Correct approach: extract everything after "/listing-images/" in the URL.
     if (images?.length) {
-      const paths = images.map((img) => {
-        // Handle full URLs or just paths depending on your storage setup
-        return img.image_url.split("/").pop();
-      });
+      const paths = images
+        .map((img) => {
+          try {
+            const url = new URL(img.image_url);
+            // pathname looks like: /storage/v1/object/public/listing-images/UUID/timestamp-name.jpg
+            const marker = "/listing-images/";
+            const idx = url.pathname.indexOf(marker);
+            if (idx === -1) return null;
+            return decodeURIComponent(url.pathname.slice(idx + marker.length));
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
 
-      await supabase.storage.from("listing-images").remove(paths);
+      if (paths.length) {
+        await supabase.storage.from("listing-images").remove(paths);
+      }
     }
 
     // 3. Delete from DB

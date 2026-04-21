@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BrowserRouter,
   Navigate,
@@ -11,6 +11,7 @@ import {
   useParams,
 } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
+import { supabase } from "./lib/supabaseClient";
 import MainApp from "./MainApp";
 import Auth from "./components/Auth/Auth";
 import { FeedList } from "./components/Feed/FeedList";
@@ -94,30 +95,75 @@ function FeedRoute() {
   );
 }
 
+// FIX: When the listing isn't in the in-memory feed (e.g. the user opened a
+// shared link or refreshed the page), we fall back to fetching it directly
+// from the discovery_feed view so shared links and refreshes always work.
 function ListingDetailRoute() {
   const navigate = useNavigate();
   const location = useLocation();
   const { id } = useParams();
   const { listings } = useOutletContext();
 
-  const listing = useMemo(() => {
+  const [fetchedListing, setFetchedListing] = useState(null);
+  const [fetchError, setFetchError] = useState(false);
+  const [fetching, setFetching] = useState(false);
+
+  // Try to find the listing in the in-memory feed first
+  const inMemoryListing = useMemo(() => {
     if (location.state?.listing?.id === id) {
       return location.state.listing;
     }
-
     return listings.find((item) => String(item.id) === id) ?? null;
   }, [id, listings, location.state]);
 
-  if (!listing) {
+  // If not found in memory, fetch from Supabase
+  useEffect(() => {
+    if (inMemoryListing || fetchedListing || fetching) return;
+
+    let cancelled = false;
+    setFetching(true);
+
+    supabase
+      .from("discovery_feed")
+      .select("*")
+      .eq("id", id)
+      .single()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error || !data) {
+          setFetchError(true);
+        } else {
+          setFetchedListing(data);
+        }
+        setFetching(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, inMemoryListing, fetchedListing, fetching]);
+
+  const listing = inMemoryListing ?? fetchedListing;
+
+  if (fetching) {
+    return (
+      <div className="flex justify-center py-32">
+        <div className="w-10 h-10 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (fetchError || (!fetching && !listing)) {
     return <Navigate to="/" replace />;
   }
+
+  if (!listing) return null;
 
   const handleBack = () => {
     if ((window.history.state?.idx ?? 0) > 0) {
       navigate(-1);
       return;
     }
-
     navigate("/", { replace: true });
   };
 

@@ -22,7 +22,7 @@ export function AuthProvider({ children }) {
         return;
       }
 
-      // 🔥 SUSPENSION CHECK
+      // SUSPENSION CHECK
       if (data?.is_suspended) {
         await supabase.auth.signOut();
         setUser(null);

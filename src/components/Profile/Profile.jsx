@@ -271,6 +271,47 @@ export default function Profile() {
     }
   };
 
+  // FIX: upsertContact handles insert/update/delete in one place.
+  // Previously, clearing a field (empty string) never deleted the existing
+  // DB row — the old code only inserted or updated.  Now an empty value
+  // causes the existing row to be removed so users can clear their numbers.
+  const upsertContact = async (existing, type, isPrimary, value) => {
+    const trimmed = value.trim();
+
+    if (!trimmed) {
+      // Field was cleared — remove the existing row if there is one
+      if (existing) {
+        const { error } = await supabase
+          .from("contact_numbers")
+          .delete()
+          .eq("id", existing.id);
+        if (error) throw error;
+      }
+      return; // Nothing more to do
+    }
+
+    const normalized = normalizePhone(trimmed);
+
+    if (existing) {
+      const { error } = await supabase
+        .from("contact_numbers")
+        .update({
+          phone_number: normalized,
+          is_primary: isPrimary ?? existing.is_primary,
+        })
+        .eq("id", existing.id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from("contact_numbers").insert({
+        user_id: user.id,
+        phone_number: normalized,
+        type,
+        is_primary: isPrimary ?? false,
+      });
+      if (error) throw error;
+    }
+  };
+
   const handleSave = async () => {
     if (!user) return;
 
@@ -279,7 +320,7 @@ export default function Profile() {
       return;
     }
 
-    // Validate phone numbers
+    // Validate phone numbers (empty is allowed — means "remove")
     if (!validatePhone(whatsapp)) {
       showToast("Invalid WhatsApp number", "error");
       return;
@@ -298,7 +339,7 @@ export default function Profile() {
     setSaving(true);
 
     try {
-      // Save profile details first so identity info stays in sync.
+      // Save profile details
       const { error: profileError } = await supabase
         .from("profiles")
         .update({
@@ -309,6 +350,7 @@ export default function Profile() {
 
       if (profileError) throw profileError;
 
+      // Fetch current contact rows
       const { data: existing, error: fetchError } = await supabase
         .from("contact_numbers")
         .select("*")
@@ -323,77 +365,20 @@ export default function Profile() {
             (isPrimary === null || c.is_primary === isPrimary),
         );
 
-      if (whatsapp.trim()) {
-        const existingWhatsapp = findContact("whatsapp");
-
-        if (existingWhatsapp) {
-          const { error } = await supabase
-            .from("contact_numbers")
-            .update({ phone_number: normalizePhone(whatsapp) })
-            .eq("id", existingWhatsapp.id);
-
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.from("contact_numbers").insert({
-            user_id: user.id,
-            phone_number: normalizePhone(whatsapp),
-            type: "whatsapp",
-            is_primary: false,
-          });
-
-          if (error) throw error;
-        }
-      }
-
-      if (primaryPhone.trim()) {
-        const existingPrimary = findContact("phone", true);
-
-        if (existingPrimary) {
-          const { error } = await supabase
-            .from("contact_numbers")
-            .update({
-              phone_number: normalizePhone(primaryPhone),
-              is_primary: true,
-            })
-            .eq("id", existingPrimary.id);
-
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.from("contact_numbers").insert({
-            user_id: user.id,
-            phone_number: normalizePhone(primaryPhone),
-            type: "phone",
-            is_primary: true,
-          });
-
-          if (error) throw error;
-        }
-      }
-
-      if (secondaryPhone.trim()) {
-        const existingSecondary = findContact("phone", false);
-
-        if (existingSecondary) {
-          const { error } = await supabase
-            .from("contact_numbers")
-            .update({
-              phone_number: normalizePhone(secondaryPhone),
-              is_primary: false,
-            })
-            .eq("id", existingSecondary.id);
-
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.from("contact_numbers").insert({
-            user_id: user.id,
-            phone_number: normalizePhone(secondaryPhone),
-            type: "phone",
-            is_primary: false,
-          });
-
-          if (error) throw error;
-        }
-      }
+      // Handle each contact field (supports clearing)
+      await upsertContact(findContact("whatsapp"), "whatsapp", false, whatsapp);
+      await upsertContact(
+        findContact("phone", true),
+        "phone",
+        true,
+        primaryPhone,
+      );
+      await upsertContact(
+        findContact("phone", false),
+        "phone",
+        false,
+        secondaryPhone,
+      );
 
       showToast("Profile + contacts saved");
     } catch (err) {
@@ -574,6 +559,10 @@ export default function Profile() {
             Contact Methods
           </h2>
         </div>
+
+        <p className="text-[11px] text-slate-500">
+          Clear any field and save to remove that contact method.
+        </p>
 
         <Field label="WhatsApp Number">
           <PhoneInput

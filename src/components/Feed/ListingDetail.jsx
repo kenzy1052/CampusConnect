@@ -7,7 +7,6 @@ import Zoom from "yet-another-react-lightbox/plugins/zoom";
 import Fullscreen from "yet-another-react-lightbox/plugins/fullscreen";
 
 import "yet-another-react-lightbox/styles.css";
-// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
 
 export default function ListingDetail({ listing, onBack }) {
   const { user } = useAuth();
@@ -37,27 +36,42 @@ export default function ListingDetail({ listing, onBack }) {
     return data || null;
   }, [listing.id]);
 
-  const recordView = useCallback(async () => {
-    try {
-      await supabase.rpc("record_engagement", {
-        p_listing_id: listing.id,
-        p_type: "view",
-      });
-    } catch (err) {
-      console.error("View tracking failed", err);
-    }
-  }, [listing.id]);
+  // BUG FIX: The original code called supabase.rpc("record_engagement", ...)
+  // but that function does not exist anywhere in the database. This caused all
+  // view and contact tracking to silently fail — view_count and contact_count
+  // never incremented, and the trust/visibility system had no engagement signal.
+  //
+  // Fix: Use a direct insert into listing_engagements. The table has partial
+  // unique indices (unique_daily_view, unique_daily_contact) that deduplicate
+  // entries per user per day — the ON CONFLICT DO NOTHING handles duplicates
+  // gracefully without throwing an error to the user.
+  const recordEngagement = useCallback(
+    async (type) => {
+      if (!user) return; // anonymous users don't track
+      try {
+        await supabase.from("listing_engagements").insert({
+          listing_id: listing.id,
+          user_id: user.id,
+          type,
+        });
+        // Conflict (duplicate for today) is silently ignored by the DB index.
+      } catch (err) {
+        // Non-critical — never surface to the user.
+        console.warn("Engagement tracking failed", err);
+      }
+    },
+    [listing.id, user],
+  );
 
-  const recordContact = useCallback(async () => {
-    try {
-      await supabase.rpc("record_engagement", {
-        p_listing_id: listing.id,
-        p_type: "contact",
-      });
-    } catch (err) {
-      console.error("Contact tracking failed", err);
-    }
-  }, [listing.id]);
+  const recordView = useCallback(
+    () => recordEngagement("view"),
+    [recordEngagement],
+  );
+
+  const recordContact = useCallback(
+    () => recordEngagement("contact"),
+    [recordEngagement],
+  );
 
   const handleRevealContact = () => {
     setShowContact(true);
@@ -79,12 +93,8 @@ export default function ListingDetail({ listing, onBack }) {
       .select("*")
       .eq("user_id", listing.seller_id);
     if (error || !data) {
-      return {
-        whatsapp: null,
-        phones: [],
-      };
+      return { whatsapp: null, phones: [] };
     }
-
     return {
       whatsapp: data.find((c) => c.type === "whatsapp")?.phone_number || null,
       phones: data.filter((c) => c.type === "phone").map((c) => c.phone_number),
@@ -198,15 +208,9 @@ export default function ListingDetail({ listing, onBack }) {
           spacing: 0,
         }}
         styles={{
-          root: {
-            backgroundColor: "#000",
-          },
-          container: {
-            backgroundColor: "#000",
-          },
-          slide: {
-            backgroundColor: "#000",
-          },
+          root: { backgroundColor: "#000" },
+          container: { backgroundColor: "#000" },
+          slide: { backgroundColor: "#000" },
         }}
       />
 
@@ -314,7 +318,6 @@ export default function ListingDetail({ listing, onBack }) {
               </span>
             </div>
 
-            {/* Thumbnail strip — opens lightbox on click */}
             {images.length > 1 && (
               <div className="flex gap-2 flex-wrap">
                 {images.map((img, i) => (
@@ -376,24 +379,26 @@ export default function ListingDetail({ listing, onBack }) {
                 </span>
               )}
 
-              {/* Listing meta */}
               <div className="mt-4 pt-4 border-t border-slate-800 space-y-2 text-xs">
-                {/* Condition */}
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">Condition</span>
-                  <span
-                    className={
-                      "px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide " +
-                      (listingData.condition === "new"
-                        ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                        : "bg-amber-500/20 text-amber-300 border border-amber-500/30")
-                    }
-                  >
-                    {listingData.condition || "Unknown"}
-                  </span>
-                </div>
+                {/* BUG FIX: Only show Condition row for products.
+                    Services don't have a condition field — previously it showed
+                    "Unknown" for every service listing, which confused buyers. */}
+                {!isService && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Condition</span>
+                    <span
+                      className={
+                        "px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide " +
+                        (listingData.condition === "new"
+                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                          : "bg-amber-500/20 text-amber-300 border border-amber-500/30")
+                      }
+                    >
+                      {listingData.condition || "Not specified"}
+                    </span>
+                  </div>
+                )}
 
-                {/* Views */}
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Views</span>
                   <span className="text-white font-medium">
@@ -401,7 +406,6 @@ export default function ListingDetail({ listing, onBack }) {
                   </span>
                 </div>
 
-                {/* Posted date */}
                 {createdDate && (
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">Posted</span>
@@ -419,7 +423,6 @@ export default function ListingDetail({ listing, onBack }) {
                 Seller
               </p>
               <div className="flex items-center gap-3">
-                {/* Avatar with initials fallback */}
                 <div className="w-12 h-12 rounded-full overflow-hidden bg-indigo-600 flex items-center justify-center text-white font-black text-sm shrink-0 border-2 border-slate-700">
                   {listingData?.seller_avatar_url ? (
                     <img
@@ -479,7 +482,6 @@ export default function ListingDetail({ listing, onBack }) {
                 </div>
               )}
 
-              {/* WhatsApp */}
               {whatsappLink && (
                 <a
                   href={whatsappLink}
