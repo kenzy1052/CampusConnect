@@ -18,15 +18,11 @@ export default function MyListings({ onCreateListing }) {
     setLoading(true);
     const { data, error } = await supabase
       .from("discovery_feed")
-      .select(
-        `
-        *,
-        listing_images(image_url, position)
-      `,
-      )
+      .select("*") // ← drop the broken listing_images join
       .eq("seller_id", user.id)
       .order("created_at", { ascending: false });
 
+    if (error) console.error("MyListings error:", error.message);
     if (!error && data) setListings(data);
     setLoading(false);
   };
@@ -158,9 +154,7 @@ export default function MyListings({ onCreateListing }) {
       ) : (
         <div className="space-y-3">
           {listings.map((listing) => {
-            const img = (listing.listing_images || []).sort(
-              (a, b) => a.position - b.position,
-            )[0];
+            const imgUrl = listing.image_url || null;
             const busy = actionId === listing.id;
             const statusLabel = getStatus(listing);
 
@@ -195,9 +189,9 @@ export default function MyListings({ onCreateListing }) {
 
                 <div className="flex w-full">
                   <div className="w-24 h-24 md:w-28 md:h-28 shrink-0 bg-slate-800 overflow-hidden">
-                    {img ? (
+                    {imgUrl ? (
                       <img
-                        src={img.image_url}
+                        src={imgUrl}
                         className="w-full h-full object-cover"
                         alt=""
                       />

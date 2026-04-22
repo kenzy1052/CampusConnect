@@ -76,9 +76,24 @@ export default function Auth() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white px-4">
       <div className="w-full max-w-md bg-slate-900 p-8 rounded-3xl border border-slate-800">
-        <h2 className="text-2xl font-black text-indigo-500 mb-6 text-center">
-          CampusConnect
-        </h2>
+        {/* Replace the plain text "CampusConnect" with this logo header */}
+        <div className="flex items-center justify-center gap-2 mb-6">
+          <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              className="w-5 h-5 text-white"
+              stroke="currentColor"
+              strokeWidth="2.5"
+            >
+              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+              <polyline points="9,22 9,12 15,12 15,22" />
+            </svg>
+          </div>
+          <span className="text-xl font-black tracking-tight text-white">
+            Campus<span className="text-indigo-400">Connect</span>
+          </span>
+        </div>
 
         {/* MODE TOGGLE */}
         <div className="flex mb-6 bg-slate-800 rounded-xl overflow-hidden">

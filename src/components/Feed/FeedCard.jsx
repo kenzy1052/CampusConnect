@@ -69,16 +69,25 @@ export function FeedCard({ item, onClick }) {
         </p>
 
         {/* SELLER ROW */}
+        {/* SELLER ROW */}
         <div className="mt-3 pt-3 border-t border-slate-800/40 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-6 h-6 rounded bg-indigo-600 flex items-center justify-center text-[10px] font-black text-white shrink-0">
-              {initial}
+            {/* ✅ Show avatar if available, fallback to initial */}
+            <div className="w-6 h-6 rounded-full overflow-hidden bg-indigo-600 flex items-center justify-center text-[10px] font-black text-white shrink-0">
+              {item.seller_avatar_url ? (
+                <img
+                  src={item.seller_avatar_url}
+                  alt={item.seller_name}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                initial
+              )}
             </div>
             <span className="text-[11px] font-medium text-slate-400 truncate">
               {item.seller_name}
             </span>
           </div>
-
           <div className={`flex items-center gap-1 shrink-0 ${tier.color}`}>
             <span className="text-[10px]">★</span>
             <span className="text-[10px] font-bold uppercase tracking-tighter">
