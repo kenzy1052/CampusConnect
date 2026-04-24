@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { compressImage } from "../../utils/compressImage";
 import { supabase } from "../../lib/supabaseClient";
 import {
   AlertTriangle,
@@ -20,64 +21,7 @@ import {
   X,
   ZapIcon,
 } from "lucide-react";
-
-// ─── STEP INDICATOR ───────────────────────────────────────────────────────────
-const STEPS = [
-  { id: 1, label: "Type & Category" },
-  { id: 2, label: "Details & Pricing" },
-  { id: 3, label: "Photos" },
-];
-
-function StepIndicator({ currentStep }) {
-  return (
-    <div className="flex items-center gap-0 mb-8">
-      {STEPS.map((step, i) => {
-        const done = currentStep > step.id;
-        const active = currentStep === step.id;
-        return (
-          <div
-            key={step.id}
-            className="flex items-center flex-1 last:flex-none"
-          >
-            <div className="flex flex-col items-center gap-1.5 min-w-[64px]">
-              <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black border-2 transition-all duration-300 ${
-                  done
-                    ? "bg-emerald-500 border-emerald-500 text-white"
-                    : active
-                      ? "bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-500/30"
-                      : "bg-slate-900 border-slate-700 text-slate-600"
-                }`}
-              >
-                {done ? <CheckCircle2 className="w-4 h-4" /> : step.id}
-              </div>
-              <span
-                className={`text-[9px] font-black uppercase tracking-widest whitespace-nowrap transition-colors ${
-                  active
-                    ? "text-indigo-400"
-                    : done
-                      ? "text-emerald-500"
-                      : "text-slate-600"
-                }`}
-              >
-                {step.label}
-              </span>
-            </div>
-            {i < STEPS.length - 1 && (
-              <div className="flex-1 h-px mx-1 mb-5">
-                <div
-                  className={`h-full transition-all duration-500 ${
-                    currentStep > step.id ? "bg-emerald-500" : "bg-slate-800"
-                  }`}
-                />
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+import { cleanTitle, cleanDescription } from "../../utils/text";
 
 // ─── PRO TIP ─────────────────────────────────────────────────────────────────
 function ProTip({ icon: Icon = Lightbulb, children }) {
@@ -135,7 +79,8 @@ function ImagePreview({ files, coverIndex, setCoverIndex, onRemove }) {
     <div className="mt-4 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-          {files.length} image{files.length > 1 ? "s" : ""} selected
+          {files.length} image{files.length > 1 ? "s" : ""} selected ·{" "}
+          {(files.reduce((s, f) => s + f.size, 0) / 1024).toFixed(0)} KB total
         </p>
         {files.length > 1 && (
           <p className="text-[10px] text-slate-600">
@@ -161,7 +106,6 @@ function ImagePreview({ files, coverIndex, setCoverIndex, onRemove }) {
               className="w-full h-full object-cover"
             />
 
-            {/* Remove button */}
             <button
               type="button"
               onClick={(e) => {
@@ -173,7 +117,6 @@ function ImagePreview({ files, coverIndex, setCoverIndex, onRemove }) {
               <X className="w-3 h-3 text-white" />
             </button>
 
-            {/* Cover badge */}
             <div
               className={`absolute bottom-0 inset-x-0 py-1.5 flex items-center justify-center gap-1 text-[9px] font-black uppercase transition-all ${
                 i === coverIndex
@@ -236,35 +179,65 @@ export function CreateListing({ user, onCancel, onSuccess }) {
   const [submitting, setSubmitting] = useState(false);
   const [contactGate, setContactGate] = useState(false);
 
-  // Derive current step for progress indicator
-  const currentStep = (() => {
-    if (images.length > 0) return 3;
-    if (
-      formData.title ||
-      formData.price ||
-      formData.price_min ||
-      formData.description
-    )
-      return 2;
-    return 1;
-  })();
-
   useEffect(() => {
+    const CACHE_KEY = "cc.categories.v1";
+    const ONE_HOUR = 60 * 60 * 1000;
+
     async function fetchCategories() {
+      // 1. Try to load from Cache first
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        try {
+          const { ts, data } = JSON.parse(cached);
+          if (Date.now() - ts < ONE_HOUR) {
+            setCategories(data);
+            setLoading(false); // <-- CRITICAL: Stop the spinner
+            return;
+          }
+        } catch (e) {
+          console.error("Cache parse error", e);
+        }
+      }
+
+      // 2. Fetch from Supabase if cache is missing or stale
       const { data, error } = await supabase.from("categories").select("*");
-      if (error) console.error("CATEGORY ERROR:", error.message);
-      setCategories(data || []);
-      setLoading(false);
+
+      if (error) {
+        console.error("CATEGORY ERROR:", error.message);
+      } else if (data) {
+        setCategories(data);
+        localStorage.setItem(
+          CACHE_KEY,
+          JSON.stringify({ ts: Date.now(), data }),
+        );
+      }
+
+      setLoading(false); // <-- CRITICAL: Stop the spinner
     }
+
     fetchCategories();
   }, []);
 
-  const handleImageChange = (e) => {
+  const handleImageChange = async (e) => {
     const files = Array.from(e.target.files);
     if (files.length < 1) return;
     if (files.length > 3) return alert("Max 3 images allowed");
-    setImages(files);
-    setCoverIndex(0);
+
+    // Reject anything insanely huge BEFORE compressing (avoids OOM on weak phones)
+    for (const f of files) {
+      if (f.size > 15 * 1024 * 1024) {
+        return alert(`"${f.name}" is over 15 MB. Please pick a smaller photo.`);
+      }
+    }
+
+    try {
+      const compressed = await Promise.all(files.map(compressImage));
+      setImages(compressed);
+      setCoverIndex(0);
+    } catch (err) {
+      console.error("Image prep failed:", err);
+      alert("Could not prepare images. Try different photos.");
+    }
   };
 
   const removeImage = (index) => {
@@ -280,8 +253,12 @@ export function CreateListing({ user, onCancel, onSuccess }) {
     e.preventDefault();
     if (submitting) return;
 
+    const title = cleanTitle(formData.title);
+    const description = cleanDescription(formData.description);
+
     // ── Validation ────────────────────────────────────────────────────────────
-    if (!formData.title.trim()) return alert("Title required");
+    if (title.length < 3)
+      return alert("Title must be at least 3 characters long");
     if (!formData.category_id) return alert("Select a category");
     if (formData.listing_type === "product" && !formData.condition) {
       return alert("Select item condition (New or Used)");
@@ -298,6 +275,10 @@ export function CreateListing({ user, onCancel, onSuccess }) {
     setSubmitting(true);
     setContactGate(false);
 
+    // Track what we created so we can roll back if anything fails
+    let createdListingId = null;
+    const uploadedPaths = [];
+
     try {
       // ── STEP 1: CONTACT GATE ──────────────────────────────────────────────
       const { data: contacts, error: contactError } = await supabase
@@ -310,13 +291,7 @@ export function CreateListing({ user, onCancel, onSuccess }) {
         setSubmitting(false);
         return;
       }
-
-      const hasPrimaryPhone = contacts?.some(
-        (c) => c.type === "phone" && c.is_primary,
-      );
-      const hasWhatsapp = contacts?.some((c) => c.type === "whatsapp");
-
-      if (!hasPrimaryPhone && !hasWhatsapp) {
+      if (!contacts || contacts.length === 0) {
         setContactGate(true);
         setSubmitting(false);
         setTimeout(() => {
@@ -328,16 +303,17 @@ export function CreateListing({ user, onCancel, onSuccess }) {
         return;
       }
 
-      // ── STEP 2: CREATE LISTING ────────────────────────────────────────────
+      // ── STEP 2: CREATE LISTING (HIDDEN) ───────────────────────────────────
       const { data: listing, error: listingError } = await supabase
         .from("listings")
         .insert([
           {
-            title: formData.title,
-            description: formData.description,
+            title: cleanTitle(formData.title),
+            description: cleanDescription(formData.description),
             type: formData.listing_type,
             category_id: formData.category_id,
             seller_id: user.id,
+            is_active: false, // <-- hidden until images are in
             condition:
               formData.listing_type === "product" ? formData.condition : null,
             price:
@@ -362,51 +338,73 @@ export function CreateListing({ user, onCancel, onSuccess }) {
       if (listingError || !listing) {
         throw new Error(listingError?.message || "Listing insert failed");
       }
+      createdListingId = listing.id;
 
       // ── STEP 3: UPLOAD IMAGES ─────────────────────────────────────────────
+      const safeCover = Math.min(coverIndex, images.length - 1);
+      const imageRows = [];
+
       for (let i = 0; i < images.length; i++) {
         const file = images[i];
-
-        const cleanName = file.name
+        const ext = (file.name.split(".").pop() || "bin")
           .toLowerCase()
-          .replace(/\s+/g, "-")
-          .replace(/[^a-z0-9.-]/g, "")
-          .slice(0, 50);
+          .replace(/[^a-z0-9]/g, "")
+          .slice(0, 5);
 
-        const filePath = `${listing.id}/${Date.now()}-${cleanName}`;
+        // user_id / listing_id / index-uuid.ext  — unique, scoped, no collisions
+        const filePath = `${user.id}/${listing.id}/${i}-${crypto.randomUUID()}.${ext}`;
 
         const { error: uploadError } = await supabase.storage
           .from("listing-images")
-          .upload(filePath, file);
-
+          .upload(filePath, file, {
+            contentType: file.type,
+            cacheControl: "31536000",
+            upsert: false,
+          });
         if (uploadError)
           throw new Error("Image upload failed: " + uploadError.message);
+        uploadedPaths.push(filePath);
 
-        const { data } = supabase.storage
+        const { data: pub } = supabase.storage
           .from("listing-images")
           .getPublicUrl(filePath);
+        if (!pub?.publicUrl) throw new Error("Failed to generate image URL");
 
-        if (!data?.publicUrl) throw new Error("Failed to generate image URL");
-
-        const { error: imageError } = await supabase
-          .from("listing_images")
-          .insert([
-            {
-              listing_id: listing.id,
-              image_url: data.publicUrl,
-              position: i + 1,
-              is_cover: i === coverIndex,
-            },
-          ]);
-
-        if (imageError)
-          throw new Error("DB insert failed: " + imageError.message);
+        imageRows.push({
+          listing_id: listing.id,
+          image_url: pub.publicUrl,
+          position: i + 1,
+          is_cover: i === safeCover,
+        });
       }
 
-      // ── STEP 4: SUCCESS ───────────────────────────────────────────────────
+      // ── STEP 4: INSERT ALL IMAGE ROWS IN ONE CALL ─────────────────────────
+      const { error: imageError } = await supabase
+        .from("listing_images")
+        .insert(imageRows);
+      if (imageError)
+        throw new Error("DB insert failed: " + imageError.message);
+
+      // ── STEP 5: FLIP TO ACTIVE — feed picks it up here ────────────────────
+      const { error: activateError } = await supabase
+        .from("listings")
+        .update({ is_active: true })
+        .eq("id", listing.id);
+      if (activateError)
+        throw new Error("Activation failed: " + activateError.message);
+
+      // ── STEP 6: SUCCESS ───────────────────────────────────────────────────
       onSuccess();
     } catch (err) {
       console.error("CREATE LISTING ERROR:", err);
+      // Roll back uploaded files
+      if (uploadedPaths.length > 0) {
+        await supabase.storage.from("listing-images").remove(uploadedPaths);
+      }
+      // Roll back the listing row (cascades to listing_images and discovery_feed)
+      if (createdListingId) {
+        await supabase.from("listings").delete().eq("id", createdListingId);
+      }
       alert(err.message || "Failed to create listing");
     } finally {
       setSubmitting(false);
@@ -440,7 +438,7 @@ export function CreateListing({ user, onCancel, onSuccess }) {
               </h2>
             </div>
             <p className="text-xs text-slate-400">
-              Follow the steps below to publish to the marketplace.
+              Fill in the details below to publish to the marketplace.
             </p>
           </div>
           <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-full shrink-0">
@@ -450,9 +448,6 @@ export function CreateListing({ user, onCancel, onSuccess }) {
             </span>
           </div>
         </div>
-
-        {/* ── STEP INDICATOR ─────────────────────────────────────────────── */}
-        <StepIndicator currentStep={currentStep} />
 
         {/* ── CONTACT GATE ───────────────────────────────────────────────── */}
         {contactGate && (
@@ -465,17 +460,10 @@ export function CreateListing({ user, onCancel, onSuccess }) {
         )}
 
         {/* ══════════════════════════════════════════════════════════════════
-            STEP 1 — TYPE & CATEGORY
+            LISTING TYPE
         ══════════════════════════════════════════════════════════════════ */}
         <div className="space-y-5">
-          <div className="flex items-center gap-3">
-            <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[10px] font-black shrink-0">
-              1
-            </div>
-            <p className="text-sm font-black text-white uppercase tracking-widest">
-              What are you listing?
-            </p>
-          </div>
+          <SectionLabel>What are you listing?</SectionLabel>
 
           {/* Type toggle */}
           <div className="bg-slate-950 p-1.5 rounded-xl flex border border-slate-800">
@@ -507,88 +495,90 @@ export function CreateListing({ user, onCancel, onSuccess }) {
               </button>
             ))}
           </div>
+        </div>
 
-          {/* Category */}
-          <div>
-            <SectionLabel>Category</SectionLabel>
-            <div className="relative">
-              <Tag className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600 pointer-events-none" />
-              <select
-                value={formData.category_id}
-                onChange={(e) =>
-                  setFormData({ ...formData, category_id: e.target.value })
-                }
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-11 pr-10 py-4 text-white appearance-none outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
-              >
-                <option value="">Select a category</option>
-                {filteredCategories.map((cat) => (
-                  <option key={cat.id} value={cat.id}>
-                    {cat.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600 pointer-events-none rotate-90" />
-            </div>
+        <div className="border-t border-slate-800/60" />
+
+        {/* ══════════════════════════════════════════════════════════════════
+            TITLE
+        ══════════════════════════════════════════════════════════════════ */}
+        <div className="space-y-2">
+          <SectionLabel>Listing Title</SectionLabel>
+          <input
+            placeholder={
+              formData.listing_type === "product"
+                ? "e.g. Vintage Polaroid Camera, barely used"
+                : "e.g. Professional Logo Design & Branding"
+            }
+            value={formData.title}
+            onChange={(e) =>
+              setFormData({ ...formData, title: e.target.value })
+            }
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all placeholder:text-slate-700"
+          />
+          <p className="text-[10px] text-slate-600 ml-1">
+            Be specific — "Nike Air Force 1 Size 43" gets far more clicks than
+            "White Sneakers"
+          </p>
+        </div>
+
+        <div className="border-t border-slate-800/60" />
+
+        {/* ══════════════════════════════════════════════════════════════════
+            DESCRIPTION
+        ══════════════════════════════════════════════════════════════════ */}
+        <div className="space-y-2">
+          <SectionLabel>Description</SectionLabel>
+          <textarea
+            rows="4"
+            placeholder={
+              formData.listing_type === "product"
+                ? "Brand, size, age, any defects, reason for selling..."
+                : "What's included, turnaround time, examples of past work..."
+            }
+            value={formData.description}
+            onChange={(e) =>
+              setFormData({ ...formData, description: e.target.value })
+            }
+            className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all resize-none placeholder:text-slate-700"
+          />
+        </div>
+
+        <div className="border-t border-slate-800/60" />
+
+        {/* ══════════════════════════════════════════════════════════════════
+            CATEGORY
+        ══════════════════════════════════════════════════════════════════ */}
+        <div className="space-y-2">
+          <SectionLabel>Category</SectionLabel>
+          <div className="relative">
+            <Tag className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600 pointer-events-none" />
+            <select
+              value={formData.category_id}
+              onChange={(e) =>
+                setFormData({ ...formData, category_id: e.target.value })
+              }
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-11 pr-10 py-4 text-white appearance-none outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+            >
+              <option value="">Select a category</option>
+              {filteredCategories.map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
+            <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600 pointer-events-none rotate-90" />
           </div>
         </div>
 
         <div className="border-t border-slate-800/60" />
 
         {/* ══════════════════════════════════════════════════════════════════
-            STEP 2 — DETAILS & PRICING
+            CONDITION (products only)
         ══════════════════════════════════════════════════════════════════ */}
-        <div className="space-y-5">
-          <div className="flex items-center gap-3">
-            <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[10px] font-black shrink-0">
-              2
-            </div>
-            <p className="text-sm font-black text-white uppercase tracking-widest">
-              Details & Pricing
-            </p>
-          </div>
-
-          {/* Title */}
-          <div>
-            <SectionLabel>Listing Title</SectionLabel>
-            <input
-              placeholder={
-                formData.listing_type === "product"
-                  ? "e.g. Vintage Polaroid Camera, barely used"
-                  : "e.g. Professional Logo Design & Branding"
-              }
-              value={formData.title}
-              onChange={(e) =>
-                setFormData({ ...formData, title: e.target.value })
-              }
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all placeholder:text-slate-700"
-            />
-            <p className="text-[10px] text-slate-600 mt-1.5 ml-1">
-              Be specific — "Nike Air Force 1 Size 43" gets far more clicks than
-              "White Sneakers"
-            </p>
-          </div>
-
-          {/* Description */}
-          <div>
-            <SectionLabel>Description</SectionLabel>
-            <textarea
-              rows="4"
-              placeholder={
-                formData.listing_type === "product"
-                  ? "Brand, size, age, any defects, reason for selling..."
-                  : "What's included, turnaround time, examples of past work..."
-              }
-              value={formData.description}
-              onChange={(e) =>
-                setFormData({ ...formData, description: e.target.value })
-              }
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all resize-none placeholder:text-slate-700"
-            />
-          </div>
-
-          {/* ── CONDITION (products only) ─────────────────────────────────── */}
-          {formData.listing_type === "product" && (
-            <div>
+        {formData.listing_type === "product" && (
+          <>
+            <div className="space-y-3">
               <SectionLabel>
                 Condition{" "}
                 <span className="text-red-500 ml-0.5 normal-case font-bold">
@@ -652,106 +642,103 @@ export function CreateListing({ user, onCancel, onSuccess }) {
                 reduce post-purchase disputes.
               </ProTip>
             </div>
+
+            <div className="border-t border-slate-800/60" />
+          </>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════════
+            PRICING
+        ══════════════════════════════════════════════════════════════════ */}
+        <div className="p-5 bg-slate-950/50 border border-slate-800 rounded-xl space-y-4">
+          <SectionLabel>Pricing Details</SectionLabel>
+
+          {formData.listing_type === "product" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm font-bold pointer-events-none">
+                  GH₵
+                </span>
+                <input
+                  type="number"
+                  placeholder="0.00"
+                  value={formData.price}
+                  onChange={(e) =>
+                    setFormData({ ...formData, price: e.target.value })
+                  }
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-14 pr-4 py-4 text-white focus:border-indigo-500 outline-none transition-all placeholder:text-slate-600"
+                />
+              </div>
+              <label className="flex items-center gap-3 cursor-pointer group w-max">
+                <div className="relative flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={formData.negotiable}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        negotiable: e.target.checked,
+                      })
+                    }
+                    className="peer sr-only"
+                  />
+                  <div className="w-12 h-6 bg-slate-800 border border-slate-700 rounded-full peer-checked:bg-indigo-600 peer-checked:border-indigo-500 transition-all" />
+                  <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-all peer-checked:translate-x-6 shadow-sm" />
+                </div>
+                <span className="text-xs font-bold text-slate-400 group-hover:text-white transition-colors uppercase tracking-wider">
+                  Negotiable
+                </span>
+              </label>
+            </div>
           )}
 
-          {/* ── PRICING ──────────────────────────────────────────────────── */}
-          <div className="p-5 bg-slate-950/50 border border-slate-800 rounded-xl space-y-4">
-            <SectionLabel>Pricing Details</SectionLabel>
-
-            {formData.listing_type === "product" && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm font-bold pointer-events-none">
-                    GH₵
-                  </span>
-                  <input
-                    type="number"
-                    placeholder="0.00"
-                    value={formData.price}
-                    onChange={(e) =>
-                      setFormData({ ...formData, price: e.target.value })
-                    }
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-14 pr-4 py-4 text-white focus:border-indigo-500 outline-none transition-all placeholder:text-slate-600"
-                  />
-                </div>
-                <label className="flex items-center gap-3 cursor-pointer group w-max">
-                  <div className="relative flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={formData.negotiable}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          negotiable: e.target.checked,
-                        })
-                      }
-                      className="peer sr-only"
-                    />
-                    <div className="w-12 h-6 bg-slate-800 border border-slate-700 rounded-full peer-checked:bg-indigo-600 peer-checked:border-indigo-500 transition-all" />
-                    <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-all peer-checked:translate-x-6 shadow-sm" />
-                  </div>
-                  <span className="text-xs font-bold text-slate-400 group-hover:text-white transition-colors uppercase tracking-wider">
-                    Negotiable
-                  </span>
-                </label>
+          {formData.listing_type === "service" && (
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="relative flex-1">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm font-bold pointer-events-none">
+                  GH₵
+                </span>
+                <input
+                  type="number"
+                  placeholder="Min"
+                  value={formData.price_min}
+                  onChange={(e) =>
+                    setFormData({ ...formData, price_min: e.target.value })
+                  }
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-14 pr-4 py-4 text-white focus:border-indigo-500 outline-none transition-all placeholder:text-slate-600"
+                />
               </div>
-            )}
-
-            {formData.listing_type === "service" && (
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div className="relative flex-1">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm font-bold pointer-events-none">
-                    GH₵
-                  </span>
-                  <input
-                    type="number"
-                    placeholder="Min"
-                    value={formData.price_min}
-                    onChange={(e) =>
-                      setFormData({ ...formData, price_min: e.target.value })
-                    }
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-14 pr-4 py-4 text-white focus:border-indigo-500 outline-none transition-all placeholder:text-slate-600"
-                  />
-                </div>
-                <div className="relative flex-1">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm font-bold pointer-events-none">
-                    GH₵
-                  </span>
-                  <input
-                    type="number"
-                    placeholder="Max"
-                    value={formData.price_max}
-                    onChange={(e) =>
-                      setFormData({ ...formData, price_max: e.target.value })
-                    }
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-14 pr-4 py-4 text-white focus:border-indigo-500 outline-none transition-all placeholder:text-slate-600"
-                  />
-                </div>
+              <div className="relative flex-1">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 text-sm font-bold pointer-events-none">
+                  GH₵
+                </span>
+                <input
+                  type="number"
+                  placeholder="Max"
+                  value={formData.price_max}
+                  onChange={(e) =>
+                    setFormData({ ...formData, price_max: e.target.value })
+                  }
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-14 pr-4 py-4 text-white focus:border-indigo-500 outline-none transition-all placeholder:text-slate-600"
+                />
               </div>
-            )}
+            </div>
+          )}
 
-            <ProTip icon={Lightbulb}>
-              {formData.listing_type === "product"
-                ? "Research similar listings first. Competitive pricing gets 3× faster responses from buyers."
-                : "A clear price range filters time-wasters and attracts serious clients from the start."}
-            </ProTip>
-          </div>
+          <ProTip icon={Lightbulb}>
+            {formData.listing_type === "product"
+              ? "Research similar listings first. Competitive pricing gets 3× faster responses from buyers."
+              : "A clear price range filters time-wasters and attracts serious clients from the start."}
+          </ProTip>
         </div>
 
         <div className="border-t border-slate-800/60" />
 
         {/* ══════════════════════════════════════════════════════════════════
-            STEP 3 — PHOTOS
+            PHOTOS
         ══════════════════════════════════════════════════════════════════ */}
         <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[10px] font-black shrink-0">
-              3
-            </div>
-            <p className="text-sm font-black text-white uppercase tracking-widest">
-              Photos
-            </p>
-          </div>
+          <SectionLabel>Photos</SectionLabel>
 
           <label className="flex items-center gap-4 cursor-pointer w-full bg-slate-950 border-2 border-dashed border-slate-800 hover:border-indigo-500/50 hover:bg-indigo-500/5 rounded-xl p-5 transition-all group">
             <div className="w-12 h-12 rounded-xl bg-indigo-500/10 group-hover:bg-indigo-500/20 flex items-center justify-center transition-all shrink-0">

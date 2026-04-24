@@ -23,6 +23,12 @@ export function FeedCard({ item, onClick }) {
       <div className="relative w-full aspect-square bg-slate-950 overflow-hidden shrink-0">
         <img
           src={item.image_url || "/placeholder.png"}
+          onError={(e) => {
+            if (e.currentTarget.src.endsWith("/placeholder.png")) return;
+            e.currentTarget.src = "/placeholder.png";
+          }}
+          loading="lazy"
+          decoding="async"
           className="w-full h-full object-cover transition-opacity duration-300"
           alt={item.title}
         />
