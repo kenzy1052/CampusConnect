@@ -1,14 +1,19 @@
+import { Helmet } from "react-helmet-async";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { Share2 } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
 import { useAuth } from "../../context/AuthContext";
 import ReportModal from "./ReportModal";
+import { FeedCard } from "./FeedCard";
+import SaveButton from "./SaveButton"; // Ensuring this is imported for the JSX below
 import Lightbox from "yet-another-react-lightbox";
 import Zoom from "yet-another-react-lightbox/plugins/zoom";
 import Fullscreen from "yet-another-react-lightbox/plugins/fullscreen";
 
 import "yet-another-react-lightbox/styles.css";
 
-export default function ListingDetail({ listing, onBack }) {
+export default function ListingDetail({ listing, onBack, onOpen }) {
   const { user } = useAuth();
   const [listingData, setListingData] = useState(listing);
   const [images, setImages] = useState([]);
@@ -19,6 +24,8 @@ export default function ListingDetail({ listing, onBack }) {
   const [whatsapp, setWhatsapp] = useState(null);
   const [reportStatus, setReportStatus] = useState(null);
   const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [moreFromSeller, setMoreFromSeller] = useState([]);
+  const [similar, setSimilar] = useState([]);
 
   const slides = useMemo(
     () => images.map((img) => ({ src: img.image_url })),
@@ -36,27 +43,16 @@ export default function ListingDetail({ listing, onBack }) {
     return data || null;
   }, [listing.id]);
 
-  // BUG FIX: The original code called supabase.rpc("record_engagement", ...)
-  // but that function does not exist anywhere in the database. This caused all
-  // view and contact tracking to silently fail — view_count and contact_count
-  // never incremented, and the trust/visibility system had no engagement signal.
-  //
-  // Fix: Use a direct insert into listing_engagements. The table has partial
-  // unique indices (unique_daily_view, unique_daily_contact) that deduplicate
-  // entries per user per day — the ON CONFLICT DO NOTHING handles duplicates
-  // gracefully without throwing an error to the user.
   const recordEngagement = useCallback(
     async (type) => {
-      if (!user) return; // anonymous users don't track
+      if (!user) return;
       try {
         await supabase.from("listing_engagements").insert({
           listing_id: listing.id,
           user_id: user.id,
           type,
         });
-        // Conflict (duplicate for today) is silently ignored by the DB index.
       } catch (err) {
-        // Non-critical — never surface to the user.
         console.warn("Engagement tracking failed", err);
       }
     },
@@ -88,10 +84,9 @@ export default function ListingDetail({ listing, onBack }) {
   }, [listing.id]);
 
   const fetchContacts = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("contact_numbers")
-      .select("*")
-      .eq("user_id", listing.seller_id);
+    const { data, error } = await supabase.rpc("get_seller_contacts", {
+      p_seller_id: listing.seller_id,
+    });
     if (error || !data) {
       return { whatsapp: null, phones: [] };
     }
@@ -140,6 +135,35 @@ export default function ListingDetail({ listing, onBack }) {
     if (user) checkReportStatus();
   }, [listing.id, user]);
 
+  useEffect(() => {
+    (async () => {
+      const [more, sim] = await Promise.all([
+        supabase
+          .from("discovery_feed")
+          .select("*")
+          .eq("seller_id", listingData.seller_id)
+          .eq("is_active", true)
+          .eq("is_hidden", false)
+          .eq("is_deleted", false)
+          .neq("id", listingData.id)
+          .order("created_at", { ascending: false })
+          .limit(4),
+        supabase
+          .from("discovery_feed")
+          .select("*")
+          .eq("category_id", listingData.category_id)
+          .eq("is_active", true)
+          .eq("is_hidden", false)
+          .eq("is_deleted", false)
+          .neq("id", listingData.id)
+          .order("visibility_score", { ascending: false })
+          .limit(8),
+      ]);
+      setMoreFromSeller(more.data || []);
+      setSimilar(sim.data || []);
+    })();
+  }, [listingData.id, listingData.seller_id, listingData.category_id]);
+
   const getPriceDisplay = () => {
     if (listingData.price !== null) return "GH₵ " + listingData.price;
     if (listingData.price_min && listingData.price_max)
@@ -147,6 +171,23 @@ export default function ListingDetail({ listing, onBack }) {
     if (listingData.price_min) return "From GH₵ " + listingData.price_min;
     if (listingData.price_max) return "Up to GH₵ " + listingData.price_max;
     return "Ask for price";
+  };
+
+  const handleShare = async () => {
+    const url = window.location.href;
+    const text = `${listingData.title} — ${getPriceDisplay()} on CampusConnect`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: listingData.title, text, url });
+        return;
+      } catch {
+        /* user cancelled */
+      }
+    }
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(text + " " + url)}`,
+      "_blank",
+    );
   };
 
   const initials = (listingData?.seller_name || "U")
@@ -177,6 +218,36 @@ export default function ListingDetail({ listing, onBack }) {
 
   return (
     <>
+      <Helmet>
+        <title>
+          {listingData.title} — {getPriceDisplay()} | CampusConnect
+        </title>
+        <meta
+          name="description"
+          content={(listingData.description || "Listed on CampusConnect").slice(
+            0,
+            160,
+          )}
+        />
+        <meta
+          property="og:title"
+          content={`${listingData.title} — ${getPriceDisplay()}`}
+        />
+        <meta
+          property="og:description"
+          content={(listingData.description || "Listed on CampusConnect").slice(
+            0,
+            160,
+          )}
+        />
+        <meta
+          property="og:image"
+          content={images[0]?.image_url || "/og-image.png"}
+        />
+        <meta property="og:type" content="product" />
+        <meta property="og:site_name" content="CampusConnect" />
+      </Helmet>
+
       <Lightbox
         open={lightboxIndex !== null}
         close={() => setLightboxIndex(null)}
@@ -358,18 +429,65 @@ export default function ListingDetail({ listing, onBack }) {
                 {listingData.description || "No description provided."}
               </p>
             </div>
+
+            {/* More from seller */}
+            {moreFromSeller.length > 0 && (
+              <section className="mt-12">
+                <h3 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-4">
+                  More from this seller
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {moreFromSeller.map((it) => (
+                    <FeedCard
+                      key={it.id}
+                      item={it}
+                      onClick={() => onOpen(it)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Similar listings */}
+            {similar.length > 0 && (
+              <section className="mt-10">
+                <h3 className="text-xs font-black uppercase tracking-widest text-slate-500 mb-4">
+                  Similar in {listingData.category_name}
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {similar.map((it) => (
+                    <FeedCard
+                      key={it.id}
+                      item={it}
+                      onClick={() => onOpen(it)}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
 
           {/* RIGHT — INFO & ACTIONS */}
           <div className="space-y-4 md:sticky md:top-6">
-            {/* TITLE & PRICE */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
               <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">
                 {listingData.category_name}
               </p>
-              <h1 className="text-2xl font-black text-white leading-tight mb-5">
-                {listingData.title}
-              </h1>
+              <div className="flex items-start justify-between gap-3">
+                <h1 className="text-2xl font-black text-white leading-tight">
+                  {listingData.title}
+                </h1>
+                <div className="flex items-center gap-2 shrink-0">
+                  <SaveButton listingId={listingData.id} />
+                  <button
+                    onClick={handleShare}
+                    className="p-2 rounded-full bg-slate-800 hover:bg-slate-700 transition-colors"
+                    title="Share listing"
+                  >
+                    <Share2 size={18} className="text-white" />
+                  </button>
+                </div>
+              </div>
               <div className="text-3xl font-black text-white">
                 {getPriceDisplay()}
               </div>
@@ -380,9 +498,6 @@ export default function ListingDetail({ listing, onBack }) {
               )}
 
               <div className="mt-4 pt-4 border-t border-slate-800 space-y-2 text-xs">
-                {/* BUG FIX: Only show Condition row for products.
-                    Services don't have a condition field — previously it showed
-                    "Unknown" for every service listing, which confused buyers. */}
                 {!isService && (
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">Condition</span>
@@ -435,13 +550,16 @@ export default function ListingDetail({ listing, onBack }) {
                   )}
                 </div>
                 <div className="min-w-0">
-                  <div className="font-bold text-white truncate">
+                  <Link
+                    to={`/seller/${listingData.seller_id}`}
+                    className="font-bold text-white truncate hover:text-indigo-400 transition-colors"
+                  >
                     {listingData.seller_name}
-                  </div>
+                  </Link>
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <span className="text-yellow-400 text-xs">★</span>
                     <span className="text-sm font-bold text-white">
-                      {listingData.trust_score || 50}
+                      {listingData.seller_trust ?? 50}
                     </span>
                     <span className="text-xs text-slate-600">/ 100 trust</span>
                   </div>

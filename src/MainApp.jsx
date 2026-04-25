@@ -38,12 +38,7 @@ export default function MainApp() {
     const el = observerTarget.current;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (
-          entries[0].isIntersecting &&
-          !loading &&
-          hasMore &&
-          isFeedView
-        ) {
+        if (entries[0].isIntersecting && !loading && hasMore && isFeedView) {
           loadMore();
         }
       },
@@ -87,7 +82,7 @@ export default function MainApp() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white font-sans">
-      <div className="w-full max-w-7xl mx-auto px-4 py-6 md:py-8">
+      <div className="w-full max-w-7xl mx-auto px-4 py-6 md:py-8 pb-24 md:pb-8">
         <header className="mb-6 flex items-center justify-between gap-4">
           <button
             onClick={handleBackToFeed}

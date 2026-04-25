@@ -50,19 +50,18 @@ export default function AuthSignIn() {
 
       if (authError) {
         // Supabase returns a generic message — we humanize it
-        if (
-          authError.message.toLowerCase().includes("invalid login") ||
-          authError.message.toLowerCase().includes("invalid credentials") ||
-          authError.message.toLowerCase().includes("email not confirmed")
-        ) {
-          // Don't hint which field is wrong — security best practice
-          throw new Error(
-            "Incorrect email or password. Please check your details and try again.",
-          );
-        }
         if (authError.message.toLowerCase().includes("email not confirmed")) {
           throw new Error(
             "Your email hasn't been verified yet. Check your inbox for the confirmation link.",
+          );
+        }
+
+        if (
+          authError.message.toLowerCase().includes("invalid login") ||
+          authError.message.toLowerCase().includes("invalid credentials")
+        ) {
+          throw new Error(
+            "Incorrect email or password. Please check your details and try again.",
           );
         }
         throw authError;

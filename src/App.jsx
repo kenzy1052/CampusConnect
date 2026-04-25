@@ -4,7 +4,9 @@ import AppRouter from "./Router";
 export default function App() {
   return (
     <AuthProvider>
-      <AppRouter />
+      <div className="min-h-screen bg-slate-950 text-white">
+        <AppRouter />
+      </div>
     </AuthProvider>
   );
 }

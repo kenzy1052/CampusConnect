@@ -1,3 +1,4 @@
+import { Eye } from "lucide-react";
 import { getTrustTier } from "../../utils/trustTier";
 
 export function FeedCard({ item, onClick }) {
@@ -13,13 +14,14 @@ export function FeedCard({ item, onClick }) {
   const isService = item.listing_type === "service";
   const initial = (item.seller_name || "U")[0].toUpperCase();
   const tier = getTrustTier(item.seller_trust ?? 50);
+  const views = item.view_count ?? 0;
 
   return (
     <div
       onClick={onClick}
       className="group bg-slate-900 rounded-xl overflow-hidden border border-slate-800/60 hover:border-indigo-500/50 hover:shadow-[0_0_20px_rgba(79,70,229,0.15)] transition-all duration-300 cursor-pointer flex flex-col"
     >
-      {/* IMAGE BLOCK - Perfect 1:1 Square */}
+      {/* IMAGE BLOCK */}
       <div className="relative w-full aspect-square bg-slate-950 overflow-hidden shrink-0">
         <img
           src={item.image_url || "/placeholder.png"}
@@ -33,13 +35,9 @@ export function FeedCard({ item, onClick }) {
           alt={item.title}
         />
 
-        {/* Subtle 2px blur overlay only if you want that "depth" feel, otherwise this layer is invisible */}
-        <div className="absolute inset-0 backdrop-blur-[2px] opacity-0 group-hover:opacity-10 transition-opacity duration-300" />
-
-        {/* BOTTOM GRADIENT (For text legibility) */}
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent pointer-events-none" />
 
-        {/* BADGES */}
+        {/* Top badges only — no heart here, that lives on the detail page */}
         <div className="absolute top-2.5 left-2.5 right-2.5 flex justify-between items-start gap-2">
           <span
             className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider ${
@@ -56,7 +54,6 @@ export function FeedCard({ item, onClick }) {
           </span>
         </div>
 
-        {/* PRICE */}
         <div className="absolute bottom-3 left-3 right-3">
           <span className="text-white font-bold text-base tracking-tight drop-shadow-md">
             {getPriceDisplay()}
@@ -74,11 +71,9 @@ export function FeedCard({ item, onClick }) {
           {item.description || "No description provided."}
         </p>
 
-        {/* SELLER ROW */}
-        {/* SELLER ROW */}
+        {/* SELLER + STATS ROW */}
         <div className="mt-3 pt-3 border-t border-slate-800/40 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            {/* ✅ Show avatar if available, fallback to initial */}
             <div className="w-6 h-6 rounded-full overflow-hidden bg-indigo-600 flex items-center justify-center text-[10px] font-black text-white shrink-0">
               {item.seller_avatar_url ? (
                 <img
@@ -94,11 +89,17 @@ export function FeedCard({ item, onClick }) {
               {item.seller_name}
             </span>
           </div>
-          <div className={`flex items-center gap-1 shrink-0 ${tier.color}`}>
-            <span className="text-[10px]">★</span>
-            <span className="text-[10px] font-bold uppercase tracking-tighter">
-              {tier.label}
-            </span>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-0.5 text-slate-500">
+              <Eye size={11} />
+              <span className="text-[10px] font-bold">{views}</span>
+            </div>
+            <div className={`flex items-center gap-0.5 ${tier.color}`}>
+              <span className="text-[10px]">★</span>
+              <span className="text-[10px] font-bold uppercase tracking-tighter">
+                {tier.label}
+              </span>
+            </div>
           </div>
         </div>
       </div>

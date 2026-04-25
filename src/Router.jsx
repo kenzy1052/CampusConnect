@@ -29,7 +29,9 @@ import { CreateListing } from "./components/Feed/CreateListing";
 import Profile from "./components/Profile/Profile";
 import MyListings from "./components/Profile/MyListings";
 import AdminPanel from "./components/Admin/AdminPanel";
+import MobileNav from "./components/MobileNav";
 import ScrollManager from "./ScrollManager";
+import SellerProfile from "./components/Profile/SellerProfile";
 
 // ── New auth pages ───────────────────────────────────────────────────────────
 import AuthSignIn from "./components/Auth/AuthSignIn";
@@ -122,7 +124,10 @@ function ListingDetailRoute() {
   const scrollY = useRef(location.state?.scrollY ?? 0);
 
   useEffect(() => {
-    if (listing) return;
+    if (listing) {
+      // re-fetch when navigating to a *different* listing
+      if (listing.id === id) return;
+    }
     supabase
       .from("discovery_feed")
       .select("*")
@@ -131,10 +136,17 @@ function ListingDetailRoute() {
       .then(({ data }) => {
         if (data) setListing(data);
       });
-  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id, listing]);
 
   const handleBack = () => {
     navigate("/", { state: { restoreScrollY: scrollY.current } });
+  };
+
+  // ✅ NEW: navigate to the next listing when a related-card is clicked
+  const handleOpen = (next) => {
+    setListing(next); // optimistic swap
+    navigate(`/listing/${next.id}`, { state: { listing: next } });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   if (!listing) {
@@ -145,7 +157,9 @@ function ListingDetailRoute() {
     );
   }
 
-  return <ListingDetail listing={listing} onBack={handleBack} />;
+  return (
+    <ListingDetail listing={listing} onBack={handleBack} onOpen={handleOpen} />
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -241,12 +255,14 @@ export default function AppRouter() {
             <Route path="mylistings" element={<MyListingsRoute />} />
             <Route path="profile" element={<Profile />} />
             <Route path="admin" element={<AdminRoute />} />
+            <Route path="/seller/:id" element={<SellerProfile />} />
           </Route>
         </Route>
 
         {/* 404 → home */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <MobileNav />
     </BrowserRouter>
   );
 }

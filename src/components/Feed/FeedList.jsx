@@ -1,20 +1,58 @@
 import { FeedCard } from "./FeedCard";
+import { FeedCardSkeleton } from "./FeedCardSkeleton";
+import { EmptyState } from "./EmptyState";
 
-export function FeedList({ listings, onListingClick }) {
-  if (!listings.length) {
+export function FeedList({ listings, onListingClick, loading, type = "feed" }) {
+  // 1. Loading State
+  if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center py-32 text-center">
-        <div className="w-20 h-20 rounded-full bg-slate-800 flex items-center justify-center text-4xl mb-5">
-          🏪
-        </div>
-        <p className="text-white font-bold text-lg">No listings found</p>
-        <p className="text-slate-500 text-sm mt-2">
-          Try a different search term or filter
-        </p>
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+        {Array.from({ length: 10 }).map((_, i) => (
+          <FeedCardSkeleton key={`skeleton-${i}`} />
+        ))}
       </div>
     );
   }
 
+  // 2. Empty States
+  if (!listings || listings.length === 0) {
+    if (type === "favorites") {
+      return (
+        <EmptyState
+          icon="💖"
+          title="No saved items"
+          description="Heart items you like to keep track of them here. They might sell fast!"
+          buttonText="Browse Feed"
+          buttonTo="/"
+        />
+      );
+    }
+
+    if (type === "profile") {
+      return (
+        <EmptyState
+          icon="📦"
+          title="No active listings"
+          description="Your shop is looking a bit empty. Turn your clutter into cash!"
+          buttonText="Post a listing"
+          buttonTo="/sell"
+        />
+      );
+    }
+
+    // Default: Search / General Feed
+    return (
+      <EmptyState
+        icon="🔍"
+        title="No listings found"
+        description="Try adjusting your filters or search terms to find what you're looking for."
+        buttonText="Back to Feed"
+        buttonTo="/"
+      />
+    );
+  }
+
+  // 3. Data State
   return (
     <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
       {listings.map((item) => (

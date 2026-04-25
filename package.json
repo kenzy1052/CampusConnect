@@ -18,6 +18,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-easy-crop": "5.5.7",
+    "react-helmet-async": "^3.0.0",
     "react-router-dom": "7.14.1",
     "yet-another-react-lightbox": "3.31.0"
   },
@@ -33,6 +34,7 @@
     "globals": "17.4.0",
     "postcss": "8.5.8",
     "tailwindcss": "4.2.2",
-    "vite": "8.0.1"
+    "vite": "8.0.1",
+    "vite-plugin-pwa": "^1.2.0"
   }
 }
